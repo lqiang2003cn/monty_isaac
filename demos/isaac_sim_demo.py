@@ -23,7 +23,7 @@ CONFIG = {
 
 # Create the simulation application
 print("Starting Isaac Sim...")
-simulation_app = SimulationApp(CONFIG)
+simulation_app = SimulationApp(CONFIG)  # pyright: ignore[reportOptionalCall]
 print("Isaac Sim started successfully!")
 
 # Now we can import omniverse modules after SimulationApp is created

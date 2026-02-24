@@ -39,7 +39,7 @@ print(f"ROS_DOMAIN_ID={ros_domain_id}")
 print(f"ROS_DISTRO={ros_distro}")
 print(f"RMW_IMPLEMENTATION={rmw_impl}")
 print(f"PYTHONPATH={pythonpath}")
-simulation_app = SimulationApp(CONFIG)
+simulation_app = SimulationApp(CONFIG)  # pyright: ignore[reportOptionalCall]
 print("Isaac Sim started!")
 
 # Import omniverse modules after SimulationApp is created

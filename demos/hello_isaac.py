@@ -20,7 +20,7 @@ config = {
 }
 
 # Create simulation app
-simulation_app = SimulationApp(config)
+simulation_app = SimulationApp(config)  # pyright: ignore[reportOptionalCall]
 
 print("\n" + "=" * 50)
 print("Isaac Sim started successfully!")
