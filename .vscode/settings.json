@@ -1,0 +1,18 @@
+{
+    "python.defaultInterpreterPath": "/home/lq/isaacsim_venv/bin/python",
+    "python.analysis.extraPaths": [
+        "/home/lq/isaacsim_venv/lib/python3.11/site-packages"
+    ],
+    "python.terminal.activateEnvironment": true,
+    "files.associations": {
+        "*.py": "python"
+    },
+    "[python]": {
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "ms-python.black-formatter"
+    },
+    "cursorpyright.analysis.extraPaths": [
+        "/home/lq/isaacsim_venv/lib/python3.11/site-packages"
+    ],
+    "python-envs.pythonProjects": []
+}

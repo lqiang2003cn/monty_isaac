@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+*.egg
+
+# Virtual envs (use a path if your venv lives inside the repo)
+*venv/
+.venv/
+env/
+
+# IDE / editor
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Isaac Sim / Omniverse (cache, logs)
+*.log
+.cache/

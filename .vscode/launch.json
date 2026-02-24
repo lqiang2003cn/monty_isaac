@@ -1,0 +1,39 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug Isaac Sim ROS2 Demo (Local)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/demos/isaac_sim_ros2_demo.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "ACCEPT_EULA": "Y",
+                "ROS_DOMAIN_ID": "0",
+                "RMW_IMPLEMENTATION": "rmw_fastrtps_cpp",
+                "ROS_DISTRO": "jazzy"
+            },
+            "python": "/home/lq/isaacsim_venv/bin/python",
+            "cwd": "${workspaceFolder}",
+            "stopOnEntry": false
+        },
+        {
+            "name": "Debug Isaac Sim ROS2 Demo (Local - Custom Python)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/demos/isaac_sim_ros2_demo.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "ACCEPT_EULA": "Y",
+                "ROS_DOMAIN_ID": "0",
+                "RMW_IMPLEMENTATION": "rmw_fastrtps_cpp",
+                "ROS_DISTRO": "jazzy"
+            },
+            "python": "${command:python.interpreterPath}",
+            "cwd": "${workspaceFolder}",
+            "stopOnEntry": false
+        }
+    ]
+}
