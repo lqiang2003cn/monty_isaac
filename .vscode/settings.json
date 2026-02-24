@@ -4,6 +4,7 @@
     "reportMissingImports": "none"
   },
   "python.analysis.extraPaths": [
+    "/home/lq/isaacsim_venv/lib/python3.11/site-packages/isaacsim/exts/isaacsim.core.api",
     "/home/lq/isaacsim_venv/lib/python3.11/site-packages",
     "/home/lq/isaacsim_venv/lib/python3.11/site-packages/isaacsim/exts/isaacsim.app.about",
     "/home/lq/isaacsim_venv/lib/python3.11/site-packages/isaacsim/exts/isaacsim.app.compatibility_check-1.1.1+107.3.2.lx64.r.cp311",
@@ -492,6 +493,7 @@
     "editor.defaultFormatter": "ms-python.black-formatter"
   },
   "cursorpyright.analysis.extraPaths": [
+    "/home/lq/isaacsim_venv/lib/python3.11/site-packages/isaacsim/exts/isaacsim.core.api",
     "/home/lq/isaacsim_venv/lib/python3.11/site-packages",
     "/home/lq/isaacsim_venv/lib/python3.11/site-packages/isaacsim/exts/isaacsim.app.about",
     "/home/lq/isaacsim_venv/lib/python3.11/site-packages/isaacsim/exts/isaacsim.app.compatibility_check-1.1.1+107.3.2.lx64.r.cp311",

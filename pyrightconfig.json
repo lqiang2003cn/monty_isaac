@@ -1,5 +1,6 @@
 {
   "extraPaths": [
+    "/home/lq/isaacsim_venv/lib/python3.11/site-packages/isaacsim/exts/isaacsim.core.api",
     "/home/lq/isaacsim_venv/lib/python3.11/site-packages",
     "/home/lq/isaacsim_venv/lib/python3.11/site-packages/isaacsim/exts/isaacsim.app.about",
     "/home/lq/isaacsim_venv/lib/python3.11/site-packages/isaacsim/exts/isaacsim.app.compatibility_check-1.1.1+107.3.2.lx64.r.cp311",
@@ -19,7 +20,6 @@
     "/home/lq/isaacsim_venv/lib/python3.11/site-packages/isaacsim/exts/isaacsim.benchmark.services",
     "/home/lq/isaacsim_venv/lib/python3.11/site-packages/isaacsim/exts/isaacsim.code_editor.jupyter",
     "/home/lq/isaacsim_venv/lib/python3.11/site-packages/isaacsim/exts/isaacsim.code_editor.vscode",
-    "/home/lq/isaacsim_venv/lib/python3.11/site-packages/isaacsim/exts/isaacsim.core.api",
     "/home/lq/isaacsim_venv/lib/python3.11/site-packages/isaacsim/exts/isaacsim.core.cloner",
     "/home/lq/isaacsim_venv/lib/python3.11/site-packages/isaacsim/exts/isaacsim.core.deprecation_manager",
     "/home/lq/isaacsim_venv/lib/python3.11/site-packages/isaacsim/exts/isaacsim.core.experimental.materials",
