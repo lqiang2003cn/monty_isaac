@@ -43,23 +43,31 @@ xhost +local:docker
 
 ## Running Demos
 
-**Important**: Use Isaac Sim's Python launcher to run scripts:
+**Important**: Run scripts with Isaac Sim's Python (either inside the container or your local Isaac Sim venv).
+
+### Inside Isaac Sim container
+
+From the workspace root inside the container (e.g. `/workspaces/isaac_ros_ws`):
 
 ```bash
-# From workspace root
-cd /workspaces/isaac_ros_ws
-
-# Hello World demo
 /isaac-sim/python.sh src/project/demos/hello_isaac.py
-
-# Extended demo
 /isaac-sim/python.sh src/project/demos/isaac_sim_demo.py
-
-# ROS2 integration demo
 /isaac-sim/python.sh src/project/demos/isaac_sim_ros2_demo.py
+/isaac-sim/python.sh src/project/demos/x3plus_isaac_demo.py
+/isaac-sim/python.sh src/project/demos/dof2_isaac_demo.py
+/isaac-sim/python.sh src/project/demos/x3plus_isaac_arm_demo.py
+# Or: python-isaac src/project/demos/hello_isaac.py
+```
 
-# Or use the alias (after rebuilding container)
-python-isaac src/project/demos/hello_isaac.py
+### On host with Isaac Sim venv
+
+From the **repository root** (e.g. `~/lqtech/dockers/monty_isaac`) with your Isaac Sim virtualenv activated:
+
+```bash
+python src/monty_demo/demos/hello_isaac.py
+python src/monty_demo/demos/x3plus_isaac_demo.py
+python src/monty_demo/demos/dof2_isaac_demo.py
+python src/monty_demo/demos/x3plus_isaac_arm_demo.py
 ```
 
 ## Demo Scripts
@@ -85,6 +93,27 @@ Shows:
 - Enabling ROS2 Bridge extension
 - Publishing simulation clock to `/clock`
 - Integrating with ROS2 ecosystem
+
+### 4. x3plus_isaac_demo.py - X3plus in Isaac Sim
+
+Loads the X3plus robot from `src/monty_demo/x3plus_robot/urdf/x3plus.urdf`, resolves ROS `package://` mesh paths, and runs the simulation.
+
+**Meshes required.** The URDF references meshes via `package://lqtech_ros2_x3plus/meshes/...`. Do one of the following:
+
+- **Copy meshes into the repo:** Copy (or symlink) the `meshes` folder from the **lqtech_ros2_x3plus** package into `src/monty_demo/x3plus_robot/meshes/`, keeping the same structure (`X3plus/visual`, `X3plus/collision`, `sensor/visual`, `sensor/collision`). See `src/monty_demo/x3plus_robot/meshes/README.md`.
+- **Use an existing package path:** Set `X3PLUS_MESH_ROOT` to the root of the package that contains the `meshes` directory (e.g. the full path to `lqtech_ros2_x3plus`), then run the demo.
+
+If the URDF importer reports missing commands, enable the extension **isaacsim.asset.importer.urdf** via Window > Extensions (it is usually loaded by default).
+
+**RViz vs Isaac Sim display:** The same URDF can look different because (1) RViz uses `/joint_states` and robot_state_publisher to compute mimic joints from the source joint; (2) Isaac Sim runs physics and requires mimic follower joints to have finite limits (the demo rewrites continuous mimic joints to revolute with limits); (3) default joint positions may differ—the demo sets initial positions to 0 after reset to match RViz. Both use Z-up and meters; the demo sets `distance_scale=1` for the importer.
+
+### 5. dof2_isaac_demo.py - 2-DOF robot arm
+
+Loads the simple 2-DOF arm from `src/monty_demo/dof2_robot/urdf/dof2_robot.urdf`. The robot uses **primitive geometry only** (cylinder, box)—no mesh files—so it runs in Isaac Sim with no extra setup.
+
+### 6. x3plus_isaac_arm_demo.py - X3plus in Isaac Sim (arm + gripper)
+
+Loads `src/monty_demo/x3plus_isaac/urdf/x3plus_isaac.urdf`: single URDF for Isaac with relative mesh paths (`../meshes/...`), arm + base + sensors + gripper. Gripper mimic joints use revolute limits so they display correctly. Put meshes under `x3plus_isaac/meshes/` (copy or symlink from `x3plus_robot/meshes`); see `x3plus_isaac/meshes/README.md`.
 
 ## Running Isaac Sim Directly
 
