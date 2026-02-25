@@ -1,4 +1,6 @@
 {
+  "workbench.tree.compactFolders": false,
+  "explorer.compactFolders": false,
   "python.defaultInterpreterPath": "/home/lq/isaacsim_venv/bin/python",
   "python.analysis.diagnosticSeverityOverrides": {
     "reportMissingImports": "none"
