@@ -25,3 +25,8 @@ Thumbs.db
 # Isaac Sim / Omniverse (cache, logs)
 *.log
 .cache/
+
+# ROS2 / colcon
+build/
+install/
+log/
