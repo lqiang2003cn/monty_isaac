@@ -140,7 +140,7 @@
         <parent link="base_link"/>
         <child link="arm_link1"/>
         <axis xyz="0 0 -1"/>
-        <limit lower="-1.5708" upper="1.5708" effort="100" velocity="1"/>
+        <limit lower="-1.5708" upper="1.5708" effort="300" velocity="1"/>
     </joint>
     <link name="arm_link2">
         <inertial>
@@ -175,7 +175,7 @@
         <parent link="arm_link1"/>
         <child link="arm_link2"/>
         <axis xyz="0 0 -1"/>
-        <limit lower="-1.5708" upper="1.5708" effort="100" velocity="1"/>
+        <limit lower="-1.5708" upper="1.5708" effort="300" velocity="1"/>
     </joint>
     <link name="arm_link3">
         <inertial>
@@ -210,7 +210,7 @@
         <parent link="arm_link2"/>
         <child link="arm_link3"/>
         <axis xyz="0 0 -1"/>
-        <limit lower="-1.5708" upper="1.5708" effort="100" velocity="1"/>
+        <limit lower="-1.5708" upper="1.5708" effort="300" velocity="1"/>
     </joint>
     <link name="arm_link4">
         <inertial>
@@ -245,7 +245,7 @@
         <parent link="arm_link3"/>
         <child link="arm_link4"/>
         <axis xyz="0 0 -1"/>
-        <limit lower="-1.5708" upper="1.5708" effort="100" velocity="1"/>
+        <limit lower="-1.5708" upper="1.5708" effort="300" velocity="1"/>
     </joint>
     <link name="arm_link5">
         <inertial>
@@ -280,7 +280,7 @@
         <parent link="arm_link4"/>
         <child link="arm_link5"/>
         <axis xyz="0 0 1"/>
-        <limit lower="-1.5708" upper="3.14159" effort="100" velocity="1"/>
+        <limit lower="-1.5708" upper="3.14159" effort="300" velocity="1"/>
     </joint>
 
     <!-- Gripper: grip_joint + mimic joints as revolute with limits for Isaac Sim PhysX Mimic API -->
@@ -305,7 +305,7 @@
         <parent link="arm_link5"/>
         <child link="rlink1"/>
         <axis xyz="0 0 1"/>
-        <limit lower="-1.54" upper="0" effort="100" velocity="1"/>
+        <limit lower="-1.54" upper="0" effort="300" velocity="1"/>
     </joint>
     <link name="rlink2">
         <inertial>

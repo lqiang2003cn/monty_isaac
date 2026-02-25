@@ -73,16 +73,17 @@ def main() -> None:
         raise RuntimeError("URDFParseFile failed. Check URDF and that meshes exist under x3plus_isaac/meshes/.")
 
     MIMIC_JOINTS = {"rlink_joint2", "rlink_joint3", "llink_joint1", "llink_joint2", "llink_joint3"}
+    ARM_GRIP_JOINTS = ["arm_joint1", "arm_joint2", "arm_joint3", "arm_joint4", "arm_joint5", "grip_joint"]
     try:
         for name, joint in robot_model.joints.items():
             if name in MIMIC_JOINTS:
                 joint.drive.strength = 0.0  # Kinematically driven by software mimic
                 joint.drive.damping = 0.0
             else:
-                joint.drive.strength = 500.0
-                joint.drive.damping = 50.0
-    except Exception:
-        pass
+                joint.drive.strength = 8000.0  # Stiff enough to hold arm + gripper against gravity
+                joint.drive.damping = 400.0
+    except Exception as e:
+        print(f"Warning: joint drive config failed: {e}")
 
     result, prim_path = omni.kit.commands.execute(
         "URDFImportRobot",
@@ -97,17 +98,6 @@ def main() -> None:
 
     world.reset()
 
-    # Software mimic: drive gripper finger joints from grip_joint every physics step
-    art = None
-    try:
-        from isaacsim.core.prims import SingleArticulation
-        art = SingleArticulation(prim_path)
-        art.initialize()
-        if art.num_dof and art.num_dof > 0:
-            art.set_joint_positions([0.0] * art.num_dof)
-    except Exception:
-        pass
-
     # Gripper mimic mapping: (joint_name, multiplier) relative to grip_joint
     GRIPPER_MIMIC = [
         ("rlink_joint2", -1.0),
@@ -116,30 +106,54 @@ def main() -> None:
         ("llink_joint2", 1.0),
         ("llink_joint3", -1.0),
     ]
+    # Grip target: 0 = fully closed, -1.54 = fully open (URDF limit lower=-1.54, upper=0).
+    GRIP_TARGET = -1.54/2
+
+    # Software mimic: drive gripper finger joints from grip_joint every physics step
+    art = None
+    try:
+        from isaacsim.core.prims import SingleArticulation
+        art = SingleArticulation(prim_path)
+        art.initialize()
+        if art.num_dof and art.num_dof > 0:
+            # Default pose: arm at 0, gripper fully open (all zeros = no link overlap)
+            default_pose = np.zeros(art.num_dof, dtype=np.float64)
+            art.set_joints_default_state(positions=default_pose)
+            art.set_joint_positions(default_pose)
+    except Exception:
+        pass
 
     def _apply_software_mimic(dt: float) -> None:
         if art is None:
             return
         try:
-            grip_idx = art.get_dof_index("grip_joint")
-            positions = art.get_joint_positions()
-            if positions is None or grip_idx < 0:
-                return
-            grip_pos = float(positions[grip_idx])
+            # Kinematically hold arm + grip + mimic every frame (avoids relying on PD drive)
+            arm_grip_indices = np.array(
+                [art.get_dof_index(n) for n in ARM_GRIP_JOINTS],
+                dtype=np.int32,
+            )
+            arm_grip_indices = arm_grip_indices[arm_grip_indices >= 0]
+            if len(arm_grip_indices) == 6:
+                arm_grip_positions = np.array(
+                    [0.0, 0.0, 0.0, 0.0, 0.0, GRIP_TARGET],
+                    dtype=np.float64,
+                )
+                art.set_joint_positions(arm_grip_positions, joint_indices=arm_grip_indices)
+            # Mimic joints follow grip target so fingers stay consistent
             mimic_indices = []
             mimic_positions = []
             for name, mult in GRIPPER_MIMIC:
                 idx = art.get_dof_index(name)
                 if idx >= 0:
                     mimic_indices.append(idx)
-                    mimic_positions.append(mult * grip_pos)
+                    mimic_positions.append(mult * GRIP_TARGET)
             if mimic_indices and mimic_positions:
                 art.set_joint_positions(
-                    np.array(mimic_positions, dtype=np.float32),
+                    np.array(mimic_positions, dtype=np.float64),
                     joint_indices=np.array(mimic_indices, dtype=np.int32),
                 )
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Warning: physics callback failed: {e}")
 
     if art is not None:
         world.add_physics_callback("gripper_mimic", _apply_software_mimic)
