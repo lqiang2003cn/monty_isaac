@@ -11,14 +11,10 @@ Links: `base_link` (cylinder), `link1` (box), `link2` (box).
 
 ## Run in Isaac Sim
 
-From the repository root with Isaac Sim Python (container or venv):
+From the repository root with Isaac Sim venv active:
 
 ```bash
-# Host (venv)
 python src/monty_demo/demos/dof2_isaac_demo.py
-
-# Container
-/isaac-sim/python.sh src/project/demos/dof2_isaac_demo.py
 ```
 
 ## URDF

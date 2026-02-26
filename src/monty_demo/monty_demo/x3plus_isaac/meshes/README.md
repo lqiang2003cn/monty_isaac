@@ -7,15 +7,16 @@ The URDF `../urdf/x3plus_isaac.urdf` references meshes with paths relative to `u
 - `X3plus/visual/` and `X3plus/collision/` — base_link, arm_link1–5, rlink1–3, llink1–3 (gripper)
 - `sensor/visual/` and `sensor/collision/` — camera_link, laser_link, mono_link
 
-From the repo root (or from this folder):
+From the repo root (x3plus_isaac lives in `src/monty_demo/monty_demo/x3plus_isaac/`):
 
 ```bash
 # Copy from x3plus_robot in this repo
-cp -r ../x3plus_robot/meshes/* ./
+cp -r src/monty_demo/x3plus_robot/meshes/* src/monty_demo/monty_demo/x3plus_isaac/meshes/
 
 # Or symlink (if x3plus_robot has meshes)
-ln -s ../x3plus_robot/meshes/X3plus ./
-ln -s ../x3plus_robot/meshes/sensor ./
+cd src/monty_demo/monty_demo/x3plus_isaac/meshes
+ln -s ../../../x3plus_robot/meshes/X3plus ./
+ln -s ../../../x3plus_robot/meshes/sensor ./
 ```
 
 A full copy from `x3plus_robot/meshes` includes all arm and gripper meshes.

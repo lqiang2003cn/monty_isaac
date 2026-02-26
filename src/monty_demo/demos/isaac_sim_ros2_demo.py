@@ -5,10 +5,7 @@ Isaac Sim + ROS2 Integration Demo
 Local installation:
     source ~/isaacsim_venv/bin/activate
     export ACCEPT_EULA=Y
-    python demos/isaac_sim_ros2_demo.py
-
-Docker:
-    /isaac-sim/python.sh src/project/demos/isaac_sim_ros2_demo.py
+    python src/monty_demo/demos/isaac_sim_ros2_demo.py
 
 This demo shows how to start Isaac Sim with ROS2 bridge enabled,
 create a simple scene with objects, and publish to ROS2 topics.

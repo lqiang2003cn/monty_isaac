@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Hello Isaac Sim - Demo for Isaac Sim 5.1.0
-Run with: /isaac-sim/python.sh src/project/demos/hello_isaac.py
+Run with: python src/monty_demo/demos/hello_isaac.py
 
 Isaac Sim 5.1.0 uses the new isaacsim API.
 """

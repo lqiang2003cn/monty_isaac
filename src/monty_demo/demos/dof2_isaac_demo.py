@@ -3,8 +3,7 @@
 2-DOF robot arm in Isaac Sim. Uses dof2_robot (primitive geometry, no mesh files).
 
 Run from repo root with Isaac Sim Python:
-  Container: /isaac-sim/python.sh src/project/demos/dof2_isaac_demo.py
-  Host (venv): python src/monty_demo/demos/dof2_isaac_demo.py
+  python src/monty_demo/demos/dof2_isaac_demo.py
 """
 
 from pathlib import Path

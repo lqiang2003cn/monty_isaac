@@ -17,14 +17,11 @@ Put meshes under **meshes/** so they match the URDF. E.g. copy or symlink from `
 
 ## Run in Isaac Sim
 
-From repo root, with meshes in place under `x3plus_isaac/meshes/`:
+From repo root, with meshes in place under `monty_demo/x3plus_isaac/meshes/`:
 
 ```bash
-# Host (venv)
 python src/monty_demo/demos/x3plus_isaac_arm_demo.py
-
-# Container
-/isaac-sim/python.sh src/project/demos/x3plus_isaac_arm_demo.py
+# or: python -m monty_demo.x3plus_isaac_arm_demo
 ```
 
-The demo loads `urdf/x3plus_isaac.urdf`; mesh paths `../meshes/...` resolve to `x3plus_isaac/meshes/`.
+The demo loads `urdf/x3plus_isaac.urdf`; mesh paths `../meshes/...` resolve to `monty_demo/x3plus_isaac/meshes/`.

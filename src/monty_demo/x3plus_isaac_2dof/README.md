@@ -12,9 +12,5 @@ Simplified X3plus for **Isaac Sim**: car base + first two arm joints only (2-DOF
 From repo root, with meshes in place under `x3plus_isaac_2dof/meshes/`:
 
 ```bash
-# Host (venv)
 python src/monty_demo/demos/x3plus_isaac_2dof_demo.py
-
-# Container
-/isaac-sim/python.sh src/project/demos/x3plus_isaac_2dof_demo.py
 ```

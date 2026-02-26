@@ -4,70 +4,33 @@ This folder contains Python demos for NVIDIA Isaac Sim 5.1.0.
 
 ## Environment
 
-- **Isaac Sim Version**: 5.1.0 (official NVIDIA container)
-- **Base Image**: `nvcr.io/nvidia/isaac-sim:5.1.0`
-- **Python**: 3.11 (bundled with Isaac Sim)
-- **ROS2**: Humble
+- **Isaac Sim**: 5.1.0 (local install)
+- **Python**: 3.11 (bundled with Isaac Sim or venv)
+- **ROS2**: Jazzy (or as installed)
 - **Documentation**: https://docs.isaacsim.omniverse.nvidia.com/latest/
 
 ## Prerequisites
 
-### 1. NGC Authentication (required for first build)
-
-On your **host machine**, log in to NVIDIA NGC:
-
-```bash
-# Get API key from https://ngc.nvidia.com/setup/api-key
-docker login nvcr.io
-# Username: $oauthtoken
-# Password: <your NGC API key>
-```
-
-### 2. Create Cache Directories
-
-```bash
-mkdir -p ~/docker/isaac-sim/cache/kit
-mkdir -p ~/docker/isaac-sim/cache/ov
-mkdir -p ~/docker/isaac-sim/cache/pip
-mkdir -p ~/docker/isaac-sim/cache/glcache
-mkdir -p ~/docker/isaac-sim/cache/computecache
-mkdir -p ~/docker/isaac-sim/logs
-mkdir -p ~/docker/isaac-sim/data
-```
-
-### 3. Enable X11 Display
-
-```bash
-xhost +local:docker
-```
+1. Install Isaac Sim locally and create a virtual environment (see [Isaac Sim Python tutorials](https://docs.isaacsim.omniverse.nvidia.com/latest/python_tutorials.html)).
+2. Activate your Isaac Sim venv before running demos.
 
 ## Running Demos
 
-**Important**: Run scripts with Isaac Sim's Python (either inside the container or your local Isaac Sim venv).
-
-### Inside Isaac Sim container
-
-From the workspace root inside the container (e.g. `/workspaces/isaac_ros_ws`):
-
-```bash
-/isaac-sim/python.sh src/project/demos/hello_isaac.py
-/isaac-sim/python.sh src/project/demos/isaac_sim_demo.py
-/isaac-sim/python.sh src/project/demos/isaac_sim_ros2_demo.py
-/isaac-sim/python.sh src/project/demos/x3plus_isaac_demo.py
-/isaac-sim/python.sh src/project/demos/dof2_isaac_demo.py
-/isaac-sim/python.sh src/project/demos/x3plus_isaac_arm_demo.py
-# Or: python-isaac src/project/demos/hello_isaac.py
-```
-
-### On host with Isaac Sim venv
-
-From the **repository root** (e.g. `~/lqtech/dockers/monty_isaac`) with your Isaac Sim virtualenv activated:
+From the **repository root** with your Isaac Sim virtualenv activated:
 
 ```bash
 python src/monty_demo/demos/hello_isaac.py
+python src/monty_demo/demos/isaac_sim_demo.py
+python src/monty_demo/demos/isaac_sim_ros2_demo.py
 python src/monty_demo/demos/x3plus_isaac_demo.py
 python src/monty_demo/demos/dof2_isaac_demo.py
-python src/monty_demo/demos/x3plus_isaac_arm_demo.py
+python src/monty_demo/demos/x3plus_isaac_2dof_demo.py
+```
+
+Or run the ROS2-control arm demo as a module:
+
+```bash
+python -m monty_demo.x3plus_isaac_arm_demo
 ```
 
 ## Demo Scripts
@@ -113,24 +76,26 @@ Loads the simple 2-DOF arm from `src/monty_demo/dof2_robot/urdf/dof2_robot.urdf`
 
 ### 6. x3plus_isaac_arm_demo.py - X3plus in Isaac Sim (arm + gripper)
 
-Loads `src/monty_demo/x3plus_isaac/urdf/x3plus_isaac.urdf`: single URDF for Isaac with relative mesh paths (`../meshes/...`), arm + base + sensors + gripper. Gripper mimic joints use revolute limits so they display correctly. Put meshes under `x3plus_isaac/meshes/` (copy or symlink from `x3plus_robot/meshes`); see `x3plus_isaac/meshes/README.md`.
+In `monty_demo/monty_demo/x3plus_isaac_arm_demo.py`. Loads `src/monty_demo/x3plus_isaac/urdf/x3plus_isaac.urdf`: single URDF for Isaac with relative mesh paths (`../meshes/...`), arm + base + sensors + gripper. Publishes/subscribes to `/x3plus/joint_states` and `/x3plus/joint_commands` for ros2_control (JointStateTopicSystem). Put meshes under `monty_demo/x3plus_isaac/meshes/` (copy or symlink from `x3plus_robot/meshes`); see `monty_demo/x3plus_isaac/meshes/README.md`.
 
 ## Running Isaac Sim Directly
 
+Use your local Isaac Sim install, for example:
+
 ```bash
-# Full GUI application
-/isaac-sim/isaac-sim.sh
+# If using standalone app
+~/isaac-sim/isaac-sim.sh
+~/isaac-sim/isaac-sim.sh --headless
+~/isaac-sim/python.sh
 
-# Headless mode
-/isaac-sim/isaac-sim.sh --headless
-
-# Python REPL with Isaac Sim
-/isaac-sim/python.sh
+# If using venv
+source ~/isaacsim_venv/bin/activate
+python ...
 ```
 
 ## API Reference
 
-Isaac Sim 5.1.0 uses the new `isaacsim` API:
+Isaac Sim 5.1.0 uses the `isaacsim` API:
 
 | Module | Description |
 |--------|-------------|
@@ -142,28 +107,21 @@ Isaac Sim 5.1.0 uses the new `isaacsim` API:
 
 ## Troubleshooting
 
-### Container Build Fails
-
-1. Ensure you're logged into NGC: `docker login nvcr.io`
-2. Check your NGC API key is valid
-
 ### No GUI Window
 
-1. On host: `xhost +local:docker`
-2. Check DISPLAY: `echo $DISPLAY`
-3. Test X11: `xeyes`
+- Check DISPLAY: `echo $DISPLAY`
+- Test X11: `xeyes`
 
 ### Slow First Launch
 
-First launch downloads shaders and caches data. Subsequent launches are faster (~10-15 seconds).
+First launch may load shaders and caches. Subsequent launches are faster.
 
 ### Module Not Found
 
-Always use `/isaac-sim/python.sh` instead of `python3` to ensure correct Python environment.
+Use your Isaac Sim Python (venv or Isaac Sim’s bundled Python), not the system `python3`.
 
 ## Resources
 
 - [Isaac Sim 5.1 Documentation](https://docs.isaacsim.omniverse.nvidia.com/latest/)
-- [Container Installation Guide](https://docs.isaacsim.omniverse.nvidia.com/latest/installation/install_container.html)
 - [Python Tutorials](https://docs.isaacsim.omniverse.nvidia.com/latest/python_tutorials.html)
 - [ROS2 Bridge](https://docs.isaacsim.omniverse.nvidia.com/latest/ros2_tutorials.html)

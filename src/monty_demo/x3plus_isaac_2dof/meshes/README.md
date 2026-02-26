@@ -11,8 +11,8 @@ From the repo root (or from this folder):
 
 ```bash
 # From x3plus_isaac_2dof/meshes/ — symlink from x3plus_isaac (if meshes already set up there)
-ln -sf ../../x3plus_isaac/meshes/X3plus ./
-ln -sf ../../x3plus_isaac/meshes/sensor ./
+ln -sf ../../monty_demo/x3plus_isaac/meshes/X3plus ./
+ln -sf ../../monty_demo/x3plus_isaac/meshes/sensor ./
 
 # Or copy from x3plus_robot
 cp -r ../../x3plus_robot/meshes/X3plus ./

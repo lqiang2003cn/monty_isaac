@@ -31,7 +31,7 @@ If you prefer not to copy files, set the environment variable **X3PLUS_MESH_ROOT
 
 ```bash
 export X3PLUS_MESH_ROOT=/path/to/lqtech_ros2_x3plus
-/isaac-sim/python.sh src/project/demos/x3plus_isaac_demo.py
+python src/monty_demo/demos/x3plus_isaac_demo.py
 ```
 
 The demo will rewrite `package://lqtech_ros2_x3plus/` in the URDF to that path so Isaac Sim can find the mesh files.

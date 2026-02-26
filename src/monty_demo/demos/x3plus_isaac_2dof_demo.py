@@ -5,8 +5,7 @@ X3plus 2-DOF in Isaac Sim. Simplified robot: car base + first two arm joints onl
 Run from repo root with Isaac Sim Python. Ensure meshes are in
 src/monty_demo/x3plus_isaac_2dof/meshes/ (see x3plus_isaac_2dof/meshes/README.md).
 
-  Container: /isaac-sim/python.sh src/project/demos/x3plus_isaac_2dof_demo.py
-  Host (venv): python src/monty_demo/demos/x3plus_isaac_2dof_demo.py
+  python src/monty_demo/demos/x3plus_isaac_2dof_demo.py
 """
 
 from pathlib import Path

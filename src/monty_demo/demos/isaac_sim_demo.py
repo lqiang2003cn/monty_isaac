@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Isaac Sim Demo - Basic simulation startup and scene creation
-Run with: /isaac-sim/python.sh src/project/demos/isaac_sim_demo.py
+Run with: python src/monty_demo/demos/isaac_sim_demo.py
 
 This demo shows how to start Isaac Sim, create a simple scene with a robot,
 and run the simulation loop.
