@@ -60,7 +60,7 @@ def generate_launch_description():
             output="screen",
             parameters=[
                 controllers_yaml,
-                {"use_sim_time": LaunchConfiguration("use_sim_time")},
+                {"use_sim_time": False},
             ],
             remappings=[
                 ("/robot_description", "/robot_description_full"),
@@ -70,16 +70,24 @@ def generate_launch_description():
             package="controller_manager",
             executable="spawner",
             name="joint_state_broadcaster_spawner",
-            arguments=["joint_state_broadcaster", "--controller-manager", "/controller_manager"],
+            arguments=[
+                "joint_state_broadcaster",
+                "--controller-manager", "/controller_manager",
+                "--controller-manager-timeout", "30",
+            ],
             output="screen",
-            parameters=[{"use_sim_time": LaunchConfiguration("use_sim_time")}],
+            parameters=[{"use_sim_time": False}],
         ),
         Node(
             package="controller_manager",
             executable="spawner",
             name="joint_trajectory_controller_spawner",
-            arguments=["joint_trajectory_controller", "--controller-manager", "/controller_manager"],
+            arguments=[
+                "joint_trajectory_controller",
+                "--controller-manager", "/controller_manager",
+                "--controller-manager-timeout", "30",
+            ],
             output="screen",
-            parameters=[{"use_sim_time": LaunchConfiguration("use_sim_time")}],
+            parameters=[{"use_sim_time": False}],
         ),
     ])

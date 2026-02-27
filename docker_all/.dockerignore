@@ -1,0 +1,36 @@
+# shared/ is mounted at runtime via docker-compose volumes — never COPYd into images.
+shared/
+
+# Utility scripts not needed inside containers
+scripts/
+
+# Component template skeleton
+components/_template/
+
+# Docker and compose files themselves
+**/Dockerfile
+**/.dockerignore
+**/docker-compose*.yml
+
+# Version control
+**/.git
+**/.gitignore
+**/.gitkeep
+
+# IDE / editor
+**/.vscode
+**/.idea
+**/*.swp
+**/*.swo
+**/*~
+
+# Python caches
+**/__pycache__
+**/*.pyc
+**/*.pyo
+
+# colcon build artifacts (should not leak into build context)
+**/build/
+**/install/
+**/log/
+**/.colcon

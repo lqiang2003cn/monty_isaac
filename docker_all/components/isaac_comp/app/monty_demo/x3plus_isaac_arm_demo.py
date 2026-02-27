@@ -18,6 +18,7 @@ from pathlib import Path
 # a compatible rclpy. LD_LIBRARY_PATH and RMW_IMPLEMENTATION must be set before
 # the extension initialises. Try container paths first (/opt/isaacsim_venv), then ~.
 def _find_isaac_bridge_ext() -> str | None:
+    # 1) Check venv-style installs (pip-based Isaac Sim)
     for base in (_os.environ.get("ISAAC_SIM_VENV"), "/opt/isaacsim_venv", _os.path.expanduser("~/isaacsim_venv")):
         if not base or not _os.path.isdir(base):
             continue
@@ -25,6 +26,10 @@ def _find_isaac_bridge_ext() -> str | None:
             ext = _os.path.join(base, "lib", py, "site-packages", "isaacsim", "exts", "isaacsim.ros2.bridge")
             if _os.path.isdir(ext):
                 return ext
+    # 2) Check standalone / Docker container install (e.g. nvcr.io/nvidia/isaac-sim)
+    for standalone in ("/isaac-sim/exts/isaacsim.ros2.bridge",):
+        if _os.path.isdir(standalone):
+            return standalone
     return None
 
 _ISAAC_BRIDGE_EXT = _find_isaac_bridge_ext()
@@ -65,6 +70,7 @@ import omni.kit.commands  # noqa: E402
 from isaacsim.asset.importer.urdf import _urdf  # noqa: E402
 from isaacsim.core.api import World  # noqa: E402
 from isaacsim.core.utils.extensions import enable_extension  # noqa: E402
+from isaacsim.core.utils.types import ArticulationAction  # noqa: E402
 from omni.kit.app import get_app  # noqa: E402
 
 # Enable ROS2 bridge before creating world
@@ -218,6 +224,8 @@ def main() -> None:
     try:
         import rclpy
         from sensor_msgs.msg import JointState
+        from rosgraph_msgs.msg import Clock
+        from builtin_interfaces.msg import Time as TimeMsg
         from rclpy.node import Node
         from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 
@@ -236,6 +244,10 @@ def main() -> None:
                     JOINT_STATES_TOPIC,
                     QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE, history=HistoryPolicy.KEEP_LAST),
                 )
+                self._clock_pub = self.create_publisher(
+                    Clock, "/clock",
+                    QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT, history=HistoryPolicy.KEEP_LAST),
+                )
 
             def _joint_commands_cb(self, msg: JointState) -> None:
                 if msg.name and len(msg.position) >= len(msg.name):
@@ -246,6 +258,12 @@ def main() -> None:
 
             def clear_latest_commands(self) -> None:
                 self._latest_commands = None
+
+            def publish_clock(self, sim_time_sec: float) -> None:
+                msg = Clock()
+                sec = int(sim_time_sec)
+                msg.clock = TimeMsg(sec=sec, nanosec=int((sim_time_sec - sec) * 1e9))
+                self._clock_pub.publish(msg)
 
             def publish_joint_state(self, names: list[str], positions: list[float]) -> None:
                 msg = JointState()
@@ -265,6 +283,8 @@ def main() -> None:
         if art is None or ros_node is None:
             return
         try:
+            ros_node.publish_clock(world.current_time)
+
             name_to_idx = {n: art.get_dof_index(n) for n in ROS2_CONTROL_JOINT_NAMES}
             name_to_idx = {n: i for n, i in name_to_idx.items() if i >= 0}
             if not name_to_idx:
@@ -285,7 +305,7 @@ def main() -> None:
                 if indices and values:
                     targets = np.array(values, dtype=np.float64)
                     idx_arr = np.array(indices, dtype=np.int32)
-                    art.set_joint_position_targets(targets, joint_indices=idx_arr)
+                    art.apply_action(ArticulationAction(joint_positions=targets, joint_indices=idx_arr))
             else:
                 arm_grip_indices = np.array(
                     [art.get_dof_index(n) for n in ARM_GRIP_JOINTS],
@@ -293,10 +313,10 @@ def main() -> None:
                 )
                 arm_grip_indices = arm_grip_indices[arm_grip_indices >= 0]
                 if len(arm_grip_indices) == 6:
-                    art.set_joint_position_targets(
-                        np.array(DEFAULT_ARM_GRIP_POSITIONS, dtype=np.float64),
+                    art.apply_action(ArticulationAction(
+                        joint_positions=np.array(DEFAULT_ARM_GRIP_POSITIONS, dtype=np.float64),
                         joint_indices=arm_grip_indices,
-                    )
+                    ))
 
             mimic_indices = []
             mimic_positions = []
@@ -306,10 +326,10 @@ def main() -> None:
                     mimic_indices.append(idx)
                     mimic_positions.append(mult * grip_pos_for_mimic)
             if mimic_indices and mimic_positions:
-                art.set_joint_position_targets(
-                    np.array(mimic_positions, dtype=np.float64),
+                art.apply_action(ArticulationAction(
+                    joint_positions=np.array(mimic_positions, dtype=np.float64),
                     joint_indices=np.array(mimic_indices, dtype=np.int32),
-                )
+                ))
 
             # Publish current state (position only)
             names_out = []

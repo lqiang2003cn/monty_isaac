@@ -4,3 +4,14 @@ Here is my vision:
 2. each component communicate using  various protocols: ros2 bridge, zmq etc as needed
 3. for now, i have to components: isaac_comp and ros2_comp and ros2_comp, they communicate using ros2 bridge
 4. use docker compose to configure running instances of the system.
+
+docker compose exec ros2_comp bash
+source /opt/ros/jazzy/setup.bash && source /workspace/install/setup.bash
+ros2 action send_goal /joint_trajectory_controller/follow_joint_trajectory \
+  control_msgs/action/FollowJointTrajectory \
+  "{trajectory: {
+    joint_names: [arm_joint1, arm_joint2, arm_joint3, arm_joint4, arm_joint5, grip_joint],
+    points: [
+      {positions: [0.5, 0.3, -0.2, 0.0, 0.0, -0.77], time_from_start: {sec: 2, nanosec: 0}}
+    ]
+  }}"
