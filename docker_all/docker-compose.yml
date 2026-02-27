@@ -1,0 +1,43 @@
+# Run from docker_all:  docker compose up
+# Build:  docker compose build
+# Both isaac_comp and ros2_comp use the same network (monty_net) and ROS_DOMAIN_ID for ROS2 discovery.
+services:
+  isaac_comp:
+    build:
+      context: .
+      dockerfile: components/isaac_comp/Dockerfile
+    image: monty_isaac_comp:latest
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    environment:
+      DISPLAY: ${DISPLAY}
+      ISAAC_HEADLESS: ${ISAAC_HEADLESS:-0}
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+      RMW_IMPLEMENTATION: rmw_fastrtps_cpp
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ./shared:/shared:ro
+    networks:
+      - monty_net
+
+  ros2_comp:
+    build:
+      context: .
+      dockerfile: components/ros2_comp/Dockerfile
+    image: monty_ros2_comp:latest
+    depends_on:
+      - isaac_comp
+    environment:
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+      RMW_IMPLEMENTATION: rmw_fastrtps_cpp
+    networks:
+      - monty_net
+
+networks:
+  monty_net:
+    driver: bridge

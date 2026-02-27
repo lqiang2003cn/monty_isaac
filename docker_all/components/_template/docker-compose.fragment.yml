@@ -1,0 +1,11 @@
+# Paste this under services: in docker_all/docker-compose.yml, then rename
+# the service and set build context/dockerfile to your component path.
+  new_component:
+    build:
+      context: .
+      dockerfile: components/_template/Dockerfile
+    image: monty_new_component:latest
+    environment:
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+    networks:
+      - monty_net

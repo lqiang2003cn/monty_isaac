@@ -1,0 +1,11 @@
+# Fragment for ros2_comp. Merge into docker_all/docker-compose.yml or include as needed.
+  ros2_comp:
+    build:
+      context: .
+      dockerfile: components/ros2_comp/Dockerfile
+    image: monty_ros2_comp:latest
+    environment:
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+      RMW_IMPLEMENTATION: rmw_fastrtps_cpp
+    networks:
+      - monty_net

@@ -1,0 +1,23 @@
+# Fragment for isaac_comp. Merge into docker_all/docker-compose.yml or include as needed.
+  isaac_comp:
+    build:
+      context: .
+      dockerfile: components/isaac_comp/Dockerfile
+    image: monty_isaac_comp:latest
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    environment:
+      DISPLAY: ${DISPLAY}
+      ISAAC_HEADLESS: ${ISAAC_HEADLESS:-0}
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+      RMW_IMPLEMENTATION: rmw_fastrtps_cpp
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ./shared:/shared:ro
+    networks:
+      - monty_net
