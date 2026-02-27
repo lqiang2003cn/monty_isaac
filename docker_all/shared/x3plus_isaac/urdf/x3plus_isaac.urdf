@@ -329,6 +329,7 @@
         <child link="rlink2"/>
         <axis xyz="0 0 1"/>
         <limit lower="0" upper="1.54" effort="100" velocity="1"/>
+        <mimic joint="grip_joint" multiplier="-1" offset="0"/>
     </joint>
     <link name="rlink3">
         <inertial>
@@ -352,6 +353,7 @@
         <child link="rlink3"/>
         <axis xyz="0 0 1"/>
         <limit lower="-1.54" upper="0" effort="100" velocity="1"/>
+        <mimic joint="grip_joint" multiplier="1" offset="0"/>
     </joint>
     <link name="llink1">
         <inertial>
@@ -375,6 +377,7 @@
         <child link="llink1"/>
         <axis xyz="0 0 1"/>
         <limit lower="0" upper="1.54" effort="100" velocity="1"/>
+        <mimic joint="grip_joint" multiplier="-1" offset="0"/>
     </joint>
     <link name="llink2">
         <inertial>
@@ -398,6 +401,7 @@
         <child link="llink2"/>
         <axis xyz="0 0 1"/>
         <limit lower="-1.54" upper="0" effort="100" velocity="1"/>
+        <mimic joint="grip_joint" multiplier="1" offset="0"/>
     </joint>
     <link name="llink3">
         <inertial>
@@ -421,6 +425,7 @@
         <child link="llink3"/>
         <axis xyz="0 0 1"/>
         <limit lower="0" upper="1.54" effort="100" velocity="1"/>
+        <mimic joint="grip_joint" multiplier="-1" offset="0"/>
     </joint>
 
     <link name="mono_link">

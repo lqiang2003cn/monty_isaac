@@ -5,6 +5,8 @@ Here is my vision:
 3. for now, i have to components: isaac_comp and ros2_comp and ros2_comp, they communicate using ros2 bridge
 4. use docker compose to configure running instances of the system.
 
+
+
 docker compose exec ros2_comp bash
 source /opt/ros/jazzy/setup.bash && source /workspace/install/setup.bash
 ros2 action send_goal /joint_trajectory_controller/follow_joint_trajectory \

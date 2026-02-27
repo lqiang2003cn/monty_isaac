@@ -170,12 +170,8 @@ def main() -> None:
 
     try:
         for name, joint in robot_model.joints.items():
-            if name in MIMIC_JOINTS_SET:
-                joint.drive.strength = 0.0
-                joint.drive.damping = 0.0
-            else:
-                joint.drive.strength = 8000.0
-                joint.drive.damping = 400.0
+            joint.drive.strength = 8000.0
+            joint.drive.damping = 400.0
     except Exception as e:
         print(f"Warning: joint drive config failed: {e}")
 
