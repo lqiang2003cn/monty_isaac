@@ -1,0 +1,1 @@
+i have connected to it using ssh.  the orin talks to the real x3plus master board through pyserial. all the details are defined in the @.py_install_dl/py_install/Rosmaster_Lib/Rosmaster_Lib.py . now, do

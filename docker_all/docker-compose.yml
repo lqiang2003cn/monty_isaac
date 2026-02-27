@@ -1,12 +1,14 @@
 # Run from docker_all:  docker compose up
 # Build:  docker compose build
-# Both isaac_comp and ros2_comp use the same network (monty_net) and ROS_DOMAIN_ID for ROS2 discovery.
+# Use --profile sim for simulation (isaac_comp + ros2_comp), --profile real for real robot (zmq_bridge_comp + ros2_comp).
+# Both stacks use the same network (monty_net) and ROS_DOMAIN_ID for ROS2 discovery.
 services:
   isaac_comp:
     build:
       context: .
       dockerfile: components/isaac_comp/Dockerfile
     image: monty_isaac_comp:latest
+    profiles: ["sim"]
     deploy:
       resources:
         reservations:
@@ -25,18 +27,33 @@ services:
     networks:
       - monty_net
 
+  zmq_bridge_comp:
+    build:
+      context: .
+      dockerfile: components/zmq_bridge_comp/Dockerfile
+    image: monty_zmq_bridge_comp:latest
+    profiles: ["real"]
+    environment:
+      ZMQ_HOST: ${ZMQ_HOST:-192.168.31.142}
+      ZMQ_PORT: ${ZMQ_PORT:-5555}
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+      RMW_IMPLEMENTATION: rmw_fastrtps_cpp
+    networks:
+      - monty_net
+
   ros2_comp:
     build:
       context: .
       dockerfile: components/ros2_comp/Dockerfile
     image: monty_ros2_comp:latest
-    depends_on:
-      - isaac_comp
     environment:
       ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
       RMW_IMPLEMENTATION: rmw_fastrtps_cpp
+    volumes:
+      - ./scripts:/scripts:ro
     networks:
       - monty_net
+    # Start bringup after either isaac_comp (sim) or zmq_bridge_comp (real) is up
 
 networks:
   monty_net:

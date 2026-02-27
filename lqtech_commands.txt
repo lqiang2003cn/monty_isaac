@@ -5,15 +5,28 @@ Here is my vision:
 3. for now, i have to components: isaac_comp and ros2_comp and ros2_comp, they communicate using ros2 bridge
 4. use docker compose to configure running instances of the system.
 
+# run with profile
+docker compose --profile real up --build
 
 
+# rebuild
+docker compose down && docker compose up --build
+
+# get into ros2_comp container:
 docker compose exec ros2_comp bash
+
+# send commands
 source /opt/ros/jazzy/setup.bash && source /workspace/install/setup.bash
+# Move first joint (arm_joint1) from current -> 0 rad -> 3.14159 rad (180 deg); other joints fixed
 ros2 action send_goal /joint_trajectory_controller/follow_joint_trajectory \
   control_msgs/action/FollowJointTrajectory \
   "{trajectory: {
     joint_names: [arm_joint1, arm_joint2, arm_joint3, arm_joint4, arm_joint5, grip_joint],
     points: [
-      {positions: [0.5, 0.3, -0.2, 0.0, 0.0, -0.77], time_from_start: {sec: 2, nanosec: 0}}
+      {positions: [0.0, 0.3, -0.2, 0.0, 0.0, -0.77], time_from_start: {sec: 2, nanosec: 0}},
+      {positions: [3.14159, 0.3, -0.2, 0.0, 0.0, -0.77], time_from_start: {sec: 4, nanosec: 0}}
     ]
   }}"
+
+# run script to send message
+docker compose exec ros2_comp bash -c "source /opt/ros/jazzy/setup.bash && source /workspace/install/setup.bash && python3 /scripts/send_first_joint_trajectory.py"
