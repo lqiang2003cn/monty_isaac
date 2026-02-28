@@ -30,3 +30,7 @@ Thumbs.db
 build/
 install/
 log/
+
+# Local env (passwords, host overrides) — do not commit
+.env
+docker_all/.env

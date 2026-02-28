@@ -53,6 +53,13 @@ WORKDIR /workspace
 
 COPY --from=build /ws/install /workspace/install
 
+# Source ROS2 + workspace in every new shell (docker exec ros2_comp bash and bash -l -c)
+RUN echo 'source /opt/ros/jazzy/setup.bash 2>/dev/null || true' > /etc/profile.d/ros2_workspace.sh \
+    && echo 'test -f /workspace/install/setup.bash && source /workspace/install/setup.bash' >> /etc/profile.d/ros2_workspace.sh \
+    && echo '\n# ROS2 + workspace (monty_demo)' >> /etc/bash.bashrc \
+    && echo 'source /opt/ros/jazzy/setup.bash 2>/dev/null || true' >> /etc/bash.bashrc \
+    && echo 'test -f /workspace/install/setup.bash && source /workspace/install/setup.bash' >> /etc/bash.bashrc
+
 COPY --chmod=755 components/ros2_comp/entrypoint.sh /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]

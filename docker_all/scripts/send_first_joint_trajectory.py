@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 # coding: utf-8
 """
-Move arm_joint1 to its hardware min (pulse 900) then hardware max (pulse 3100).
-Other joints stay at their current positions.
+Move arm_joint1 to -pi/2 only. All other joints stay at their current positions.
 
 Usage (from inside ros2_comp container):
   source /opt/ros/jazzy/setup.bash && source /workspace/install/setup.bash
@@ -31,10 +30,8 @@ JOINT_NAMES = [
 JOINT_STATES_TOPIC = "/x3plus/joint_states"
 ACTION_NAME = "/joint_trajectory_controller/follow_joint_trajectory"
 TIMEOUT_GET_STATE_SEC = 10.0
-TIME_POINT1_SEC = 2.0
-TIME_POINT2_SEC = 4.0
-ARM_JOINT1_MIN = -math.pi / 2   # hw min: 0° label, pulse 900
-ARM_JOINT1_MAX = math.pi / 2    # hw max: 360° label, pulse 3100
+TIME_POINT_SEC = 5.0  # time to reach -pi/2
+ARM_JOINT1_TARGET = -math.pi / 2
 
 
 class SendFirstJointTrajectory(Node):
@@ -84,20 +81,15 @@ class SendFirstJointTrajectory(Node):
         self.get_logger().info(
             "Current positions (rad): %s" % [round(p, 4) for p in self._current_positions]
         )
-        pos1 = [ARM_JOINT1_MIN] + list(self._current_positions[1:])
-        pos2 = [ARM_JOINT1_MAX] + list(self._current_positions[1:])
+        target_pos = [ARM_JOINT1_TARGET] + list(self._current_positions[1:])
 
         goal_msg = FollowJointTrajectory.Goal()
         goal_msg.trajectory = JointTrajectory()
         goal_msg.trajectory.joint_names = list(JOINT_NAMES)
         goal_msg.trajectory.points = [
             JointTrajectoryPoint(
-                positions=pos1,
-                time_from_start=Duration(sec=int(TIME_POINT1_SEC), nanosec=0),
-            ),
-            JointTrajectoryPoint(
-                positions=pos2,
-                time_from_start=Duration(sec=int(TIME_POINT2_SEC), nanosec=0),
+                positions=target_pos,
+                time_from_start=Duration(sec=int(TIME_POINT_SEC), nanosec=0),
             ),
         ]
 
@@ -106,7 +98,7 @@ class SendFirstJointTrajectory(Node):
             self.get_logger().error("Action server not available")
             return False
 
-        self.get_logger().info("Sending goal: joint1 min -> max, others unchanged")
+        self.get_logger().info("Sending goal: joint1 -> -pi/2, others unchanged")
         future = self._action_client.send_goal_async(goal_msg)
         rclpy.spin_until_future_complete(self, future, timeout_sec=5.0)
         if not future.done():
@@ -119,7 +111,7 @@ class SendFirstJointTrajectory(Node):
 
         result_future = goal_handle.get_result_async()
         self.get_logger().info("Goal accepted, waiting for result...")
-        rclpy.spin_until_future_complete(self, result_future, timeout_sec=TIME_POINT2_SEC + 5.0)
+        rclpy.spin_until_future_complete(self, result_future, timeout_sec=TIME_POINT_SEC + 5.0)
         if not result_future.done():
             self.get_logger().warn("Result wait timed out (trajectory may still be running)")
             return True

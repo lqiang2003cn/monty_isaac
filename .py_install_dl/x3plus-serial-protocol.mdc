@@ -1,0 +1,84 @@
+---
+description: x3plus robot serial protocol and hardware timing constraints
+globs: lqtech_grpc_x3plus/python/x3plus/**/*.py
+alwaysApply: false
+---
+
+# x3plus Serial Protocol & Hardware Reference
+
+## Serial Bus
+
+- Single UART at 115200 baud via `/dev/ttyUSB0`
+- Half-duplex protocol: all commands and responses share one bus
+- Frame format: `[0xFF, DEVICE_ID, length, function_code, ...payload, checksum]`
+- Receive thread (`__receive_data`) runs in background, parses responses into instance variables
+
+## Servo Write (fire-and-forget)
+
+- `set_uart_servo(id, pulse, run_time)` sends 10 bytes, no response from controller
+- Built-in `__delay_time = 2ms` sleep after every `ser.write()`
+- `run_time` is silently capped to **2000ms max** by the driver
+- `__arm_ctrl_enable` must be True or write is silently skipped
+- Pulse range: 96–4000; angle 0–180 for joints 1–4,6; 0–270 for joint 5
+
+## Servo Read (request-response)
+
+- `get_uart_servo_value(id)` sends a `FUNC_REQUEST_DATA` request (7 bytes + 2ms delay)
+- Then polls `__read_id` every 1ms, up to 30 iterations (30ms timeout)
+- Successful read: ~5–10ms total round-trip
+- Timeout read: ~32–34ms (returns -1, -1)
+- `get_uart_servo_angle()` wraps this with pulse→angle conversion
+
+## Critical Timing: Back-to-Back Reads
+
+- The controller **cannot respond to consecutive requests without a gap**
+- Back-to-back reads produce alternating success/failure: every other read times out
+- Pattern: success (~8ms) → timeout (~34ms) → success (~8ms) → ...
+- Effective rate: ~24 successful reads/second (~42ms per useful sample)
+- Adding ~35–40ms gap between reads eliminates the timeouts without losing data
+
+## Critical Timing: Read Before Write
+
+- Do NOT call `get_uart_servo_angle()` before `set_uart_servo_angle()` — it was observed to prevent the servo from moving entirely
+- The working pattern: init → `create_receive_threading()` → sleep(0.15) → set → read loop
+- The original working script (`set_angle_1.py`) never reads before writing
+
+## Movement Tracking
+
+- No "movement complete" flag or callback exists in the protocol
+- Stop condition: compare read angle to target angle (physical confirmation)
+- Guard against stale first read: don't accept "reached" until either the angle has changed from the starting value, or a minimum time (100ms) has elapsed
+- Timeout fallback: `run_time/1000 + margin` seconds
+
+## Angle ↔ Pulse Conversion (all joints)
+
+All conversions are linear interpolations. Functions: `__arm_convert_value` (angle→pulse) and `__arm_convert_angle` (pulse→angle).
+
+| Joint(s) | Angle range | Pulse range | Direction |
+|-----------|-------------|-------------|-----------|
+| **1–4** | 0°–180° | 3100–900 | **Inverted** (0°→3100, 180°→900) |
+| **5** | 0°–270° | 380–3700 | Normal (0°→380, 270°→3700) |
+| **6** | 0°–180° | 900–3100 | Normal (0°→900, 180°→3100) |
+
+- Joints 1–4: `pulse = (3100-900)*(angle-180)/(0-180)+900` — opposite direction to joint 6
+- Joint 5: `pulse = (3700-380)*(angle-0)/(270-0)+380` — unique wider range
+- Joint 6: `pulse = (3100-900)*(angle-0)/(180-0)+900` — same pulse range as 1–4 but non-inverted
+- `__arm_convert_angle` adds `+0.5` before `int()` truncation for rounding
+
+## Units: Degrees vs Radians
+
+- **Servo API uses degrees exclusively** — no radians anywhere in the servo path
+- **IMU attitude** (`__roll`, `__pitch`, `__yaw`) stored as radians (int16 from MCU / 10000.0)
+- `get_imu_attitude_data(ToAngle=True)` multiplies by 180/π ≈ 57.296 to return degrees
+- **Gyroscope** (MPU9250) stored as rad/s: `raw / 3754.9` (derived from ±500dps full-scale)
+- **Accelerometer** stored as m/s²: `raw / 1671.84` (derived from ±2g full-scale)
+
+## ZMQ Service (`lqtech_zmq_service.py`)
+
+- JSON-over-ZMQ REP/REQ on tcp port 5555 (configurable via `--port` or `ZMQ_PORT` env)
+- All joint values in requests and responses are **integer degrees** — no radian conversion
+- `getJointPositionArray` → returns `{"joint_array": [a1..a6]}` in degrees
+- `setJointPositionArray` → expects `{"joint_array": [a1..a6]}` in degrees, hardcoded `run_time=2000`
+- `setJointPositionSingle` → expects `{"joint_name": "arm_joint1", "joint_value": int}` in degrees
+- Only `arm_joint1` (sid=1) is mapped in `joint_name_to_sid_map`
+- If a client works in radians (e.g. ROS), conversion must happen client-side

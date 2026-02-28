@@ -127,7 +127,8 @@ class Rosmaster(object):
         time.sleep(.002)
 
     def __del__(self):
-        self.ser.close()
+        if getattr(self, 'ser', None) is not None:
+            self.ser.close()
         self.__uart_state = 0
         print("serial Close!")
 
@@ -293,9 +294,7 @@ class Rosmaster(object):
     def __arm_convert_value(self, s_id, s_angle):
         value = -1
         if s_id == 1:
-            # Joint 1: accept 0-360 so 180° physical is reachable (0-180 only gave 0-90° on some hardware)
-            s_angle = max(0, min(360, s_angle))
-            value = int((3100 - 900) * (s_angle - 0) / (360 - 0) + 900)
+            value = int((3100 - 900) * (s_angle - 180) / (0 - 180) + 900)
         elif s_id == 2:
             value = int((3100 - 900) * (s_angle - 180) / (0 - 180) + 900)
         elif s_id == 3:
@@ -313,8 +312,7 @@ class Rosmaster(object):
     def __arm_convert_angle(self, s_id, s_value):
         s_angle = -1
         if s_id == 1:
-            # Joint 1: report 0-360 to match __arm_convert_value
-            s_angle = int((s_value - 900) * (360 - 0) / (3100 - 900) + 0 + 0.5)
+            s_angle = int((s_value - 900) * (0 - 180) / (3100 - 900) + 180 + 0.5)
         elif s_id == 2:
             s_angle = int((s_value - 900) * (0 - 180) / (3100 - 900) + 180 + 0.5)
         elif s_id == 3:
@@ -808,7 +806,7 @@ class Rosmaster(object):
         try:
             if not self.__arm_ctrl_enable:
                 return
-            if 0 <= angle_s[0] <= 360 and 0 <= angle_s[1] <= 180 and 0 <= angle_s[2] <= 180 and \
+            if 0 <= angle_s[0] <= 180 and 0 <= angle_s[1] <= 180 and 0 <= angle_s[2] <= 180 and \
                 0 <= angle_s[3] <= 180 and 0 <= angle_s[4] <= 270 and 0 <= angle_s[5] <= 180:
                 if run_time > 2000:
                     run_time = 2000

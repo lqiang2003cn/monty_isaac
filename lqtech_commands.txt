@@ -12,11 +12,10 @@ docker compose --profile real up --build
 # rebuild
 docker compose down && docker compose up --build
 
-# get into ros2_comp container:
+# get into ros2_comp container (ROS2 + workspace already sourced in shell):
 docker compose exec ros2_comp bash
 
-# send commands
-source /opt/ros/jazzy/setup.bash && source /workspace/install/setup.bash
+# send commands (ros2 already on PATH from bashrc)
 # Move first joint (arm_joint1) from current -> 0 rad -> 3.14159 rad (180 deg); other joints fixed
 ros2 action send_goal /joint_trajectory_controller/follow_joint_trajectory \
   control_msgs/action/FollowJointTrajectory \
@@ -28,5 +27,6 @@ ros2 action send_goal /joint_trajectory_controller/follow_joint_trajectory \
     ]
   }}"
 
-# run script to send message
-docker compose exec ros2_comp bash -c "source /opt/ros/jazzy/setup.bash && source /workspace/install/setup.bash && python3 /scripts/send_first_joint_trajectory.py"
+# run script to send message (must run from docker_all/; use -l for login shell so ROS is sourced)
+cd docker_all
+docker compose exec ros2_comp bash -l -c "python3 /scripts/send_first_joint_trajectory.py"

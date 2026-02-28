@@ -38,6 +38,9 @@ services:
       ZMQ_PORT: ${ZMQ_PORT:-5555}
       ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
       RMW_IMPLEMENTATION: rmw_fastrtps_cpp
+      ZMQ_REMOTE_SSH: ${ZMQ_REMOTE_SSH:-}
+      ZMQ_REMOTE_SSH_PASSWORD: ${ZMQ_REMOTE_SSH_PASSWORD:-}
+      ZMQ_REMOTE_ENV: ${ZMQ_REMOTE_ENV:-gRPC}
     networks:
       - monty_net
 

@@ -1,5 +1,7 @@
 # Paste this under services: in docker_all/docker-compose.yml
 # Use profile "real" to run with real robot; zmq_bridge_comp replaces isaac_comp for hardware.
+# Optional: set ZMQ_REMOTE_SSH (e.g. wheeltec@192.168.31.142) and ZMQ_REMOTE_SSH_PASSWORD to auto-start
+# the ZMQ service on the robot via SSH when probe fails (use .env or secrets, do not commit password).
   zmq_bridge_comp:
     build:
       context: .
@@ -11,5 +13,7 @@
       ZMQ_PORT: ${ZMQ_PORT:-5555}
       ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
       RMW_IMPLEMENTATION: rmw_fastrtps_cpp
+      # ZMQ_REMOTE_SSH: ${ZMQ_REMOTE_SSH:-}           # e.g. wheeltec@192.168.31.142
+      # ZMQ_REMOTE_SSH_PASSWORD: ${ZMQ_REMOTE_SSH_PASSWORD:-}
     networks:
       - monty_net
