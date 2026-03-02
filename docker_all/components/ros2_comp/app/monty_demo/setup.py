@@ -29,9 +29,7 @@ setup(
     data_files=[
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
         ("share/" + package_name, ["package.xml"]),
-        ("share/" + package_name + "/config", ["config/x3plus_controllers.yaml"]),
         ("share/" + package_name + "/config", ["opus_plan_and_imp/config/opus_x3plus_controllers.yaml"]),
-        ("share/" + package_name + "/launch", ["launch/x3plus_bringup.launch.py"]),
         ("share/" + package_name + "/launch", ["opus_plan_and_imp/launch/opus_x3plus_bringup.launch.py"]),
         (
             "share/" + package_name + "/urdf",

@@ -6,7 +6,9 @@ All source and Docker wiring for the monty_isaac stack live here. Each runtime c
 
 - **components/** — One folder per Docker component. Each has a `Dockerfile` and optionally `docker-compose.fragment.yml`.
   - **isaac_comp** — Isaac Sim 5.1 + ROS2 bridge (X3plus arm + gripper). **Self-contained**: all code and resources under `components/isaac_comp/app/` (no dependency on ros2_comp at build time).
-  - **ros2_comp** — ROS2 workspace with `monty_demo`; runs `ros2 launch monty_demo x3plus_bringup.launch.py`.
+  - **ros2_comp** — ROS2 workspace with `monty_demo`; runs `ros2 launch monty_demo opus_x3plus_bringup.launch.py`.
+  - **zmq_bridge_comp** — ROS2–ZMQ bridge; connects to the real robot’s ZMQ service (run on host or in “real” profile).
+  - **remote_zmq_service** — ZMQ server + x3plus serial driver; **deploy on the robot machine** (e.g. NVIDIA Orin Nano, ARM64). Run in Docker with `--device /dev/ttyUSB0`. See `components/remote_zmq_service/README.md` for build/run on Orin.
   - **_template** — Scaffold for adding new components (copy, rename, implement).
 - **shared/** — Shared config (e.g. `ros2/` for Fast DDS profile) and scripts.
 - **scripts/** — Host scripts: `build_all.sh`, `run_compose.sh`, `copy_x3plus_from_src.sh`.
@@ -40,6 +42,23 @@ cd docker_all
 docker compose build
 docker compose up
 ```
+
+**Real profile with remote ZMQ on Orin Nano (ARM64):** Use the wrapper script. By default it (1) **rsyncs** `docker_all/` to the Orin, (2) **builds** `remote_zmq_service` for `linux/arm64` locally (Docker Buildx) and streams the image to the Orin (no Docker Hub pull on Orin), (3) starts the container on the Orin, (4) runs `docker compose --profile real` locally. From `docker_all` or repo root:
+
+```bash
+# From docker_all
+REMOTE_ORIN_HOST=wheeltec@192.168.31.142 ./scripts/real_up.sh up --build
+
+# From repo root
+REMOTE_ORIN_HOST=wheeltec@192.168.31.142 ./docker_all/scripts/real_up.sh up --build
+
+# With SSH password (non-interactive); install sshpass on host: apt install sshpass
+REMOTE_ORIN_HOST=wheeltec@192.168.31.142 REMOTE_ORIN_SSH_PASSWORD=yourpassword ./scripts/real_up.sh up --build
+```
+
+Optional env: `REMOTE_ORIN_REPO_PATH` (sync destination on Orin, default `~/monty_isaac`), `SKIP_REMOTE_BUILD=1` to skip sync and remote deploy. If the Orin can reach Docker Hub, set `REMOTE_BUILD_ON_ORIN=1` to build the image on the Orin instead of local cross-build.
+
+**When using this flow, do not set `ZMQ_REMOTE_SSH`** (e.g. in `.env`). If set, `zmq_bridge_comp` will try to start the remote ZMQ service via SSH when the first probe fails; its default command starts the **legacy** bare Python process (grpc path), which conflicts with the Docker `remote_zmq_service` container and port 5555.
 
 **Requirements:** Docker with Compose v2, and for `isaac_comp` an NVIDIA GPU and the NVIDIA Container Toolkit. The default `isaac_comp` Dockerfile uses **Isaac Sim 5.1** (`nvcr.io/nvidia/isaac-sim:5.1.0`); override with `--build-arg ISAAC_BASE=...` if needed.
 

@@ -2,6 +2,10 @@
 # Build:  docker compose build
 # Use --profile sim for simulation (isaac_comp + ros2_comp), --profile real for real robot (zmq_bridge_comp + ros2_comp).
 # Both stacks use the same network (monty_net) and ROS_DOMAIN_ID for ROS2 discovery.
+#
+# Real profile + remote ZMQ on Orin: run ./scripts/real_up.sh up --build (from docker_all) so the
+# remote_zmq_service image is built on the Orin and the container started before local compose.
+# Set REMOTE_ORIN_HOST (e.g. wheeltec@192.168.31.142) and REMOTE_ORIN_REPO_PATH if needed.
 services:
   isaac_comp:
     build:
@@ -38,9 +42,6 @@ services:
       ZMQ_PORT: ${ZMQ_PORT:-5555}
       ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
       RMW_IMPLEMENTATION: rmw_fastrtps_cpp
-      ZMQ_REMOTE_SSH: ${ZMQ_REMOTE_SSH:-}
-      ZMQ_REMOTE_SSH_PASSWORD: ${ZMQ_REMOTE_SSH_PASSWORD:-}
-      ZMQ_REMOTE_ENV: ${ZMQ_REMOTE_ENV:-gRPC}
     networks:
       - monty_net
 

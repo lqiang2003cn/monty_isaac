@@ -39,7 +39,7 @@ class OpusX3PlusRealBridge(Node):
         self.declare_parameter("serial_port", "/dev/ttyUSB0")
         self.declare_parameter("baud_rate", 115200)
         self.declare_parameter("state_publish_hz", 20.0)
-        self.declare_parameter("servo_run_time_ms", 50)
+        self.declare_parameter("servo_run_time_ms", 60)
         serial_port = self.get_parameter("serial_port").get_parameter_value().string_value
         state_hz = self.get_parameter("state_publish_hz").get_parameter_value().double_value
         self._run_time_ms = int(self.get_parameter("servo_run_time_ms").value)

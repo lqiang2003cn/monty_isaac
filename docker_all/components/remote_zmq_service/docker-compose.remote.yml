@@ -1,0 +1,19 @@
+# Run this on the remote machine (e.g. Orin Nano) where the robot serial is attached.
+# On Orin use docker-compose (V1). From repo root: docker-compose -f ... up -d --build --force-recreate
+# On the Orin, ensure /dev/ttyUSB0 exists and is readable (e.g. sudo chmod a+rw /dev/ttyUSB0).
+# REMOTE_ZMQ_IMAGE: set on Orin when pulling from local registry (e.g. 192.168.31.100:5000/monty_remote_zmq_service:latest)
+services:
+  remote_zmq_service:
+    build:
+      context: ../..
+      dockerfile: components/remote_zmq_service/Dockerfile
+    image: ${REMOTE_ZMQ_IMAGE:-monty_remote_zmq_service:latest}
+    container_name: remote_zmq_service
+    restart: unless-stopped
+    devices:
+      - /dev/ttyUSB0:/dev/ttyUSB0
+    ports:
+      - "5555:5555"
+    environment:
+      ZMQ_PORT: "5555"
+      SERIAL_DEVICE: "/dev/ttyUSB0"

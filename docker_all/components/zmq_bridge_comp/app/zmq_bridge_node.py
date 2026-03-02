@@ -4,8 +4,7 @@
 ROS2 bridge: subscribes to /x3plus/joint_commands, publishes /x3plus/joint_states.
 Forwards commands to the real robot via ZMQ (radians on ROS side, degrees on HW side).
 
-At startup: probes ZMQ service; optionally starts remote service via SSH if
-ZMQ_REMOTE_SSH and ZMQ_REMOTE_START_CMD are set. Exits with clear logs if connection fails.
+At startup: probes ZMQ service and retries; exits with clear logs if connection fails.
 
 Mapping (verified against x3plus_isaac.urdf and x3plus_serial.py):
   deg = rad * 180/pi + 90       rad = (deg - 90) * pi/180
@@ -22,7 +21,6 @@ Mapping (verified against x3plus_isaac.urdf and x3plus_serial.py):
 import json
 import math
 import os
-import subprocess
 import sys
 import threading
 import time
@@ -91,76 +89,14 @@ def probe_connection(host: str, port: int, timeout_ms: int = 5000) -> bool:
                 pass
 
 
-def try_start_remote_service(ssh_target: str, start_cmd: str, log_fn, password: str = None) -> bool:
-    """Run start_cmd on remote host via SSH. log_fn(msg) for logging. Returns True if SSH exit 0.
-    If password is set, use sshpass for non-interactive auth (sshpass must be installed).
-    """
-    log_fn("Attempting to start remote ZMQ service: ssh %s '<cmd>'" % ssh_target)
-    if password:
-        log_fn("Using password authentication (ZMQ_REMOTE_SSH_PASSWORD).")
-    try:
-        ssh_opts = ["-o", "ConnectTimeout=10", "-o", "StrictHostKeyChecking=no", ssh_target, start_cmd]
-        if password:
-            # sshpass -p <password> ssh ... (password never logged)
-            proc = subprocess.run(
-                ["sshpass", "-p", password, "ssh"] + ssh_opts,
-                capture_output=True,
-                text=True,
-                timeout=30,
-                env={**os.environ},  # pass through env
-            )
-        else:
-            proc = subprocess.run(
-                ["ssh"] + ssh_opts,
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-        out = proc
-        if out.returncode != 0:
-            log_fn("SSH command failed (exit %d). stderr: %s" % (out.returncode, out.stderr or "(none)"))
-            return False
-        if out.stdout or out.stderr:
-            log_fn("SSH stdout: %s  stderr: %s" % (out.stdout or "", out.stderr or ""))
-        return True
-    except subprocess.TimeoutExpired:
-        log_fn("SSH command timed out after 30s")
-        return False
-    except FileNotFoundError as e:
-        if password:
-            log_fn("'sshpass' or 'ssh' not found; install openssh-client and sshpass for password auth.")
-        else:
-            log_fn("'ssh' not found; cannot auto-start remote service.")
-        return False
-    except Exception as e:
-        log_fn("SSH command error: %s" % e)
-        return False
-
-
 def ensure_zmq_connection(host: str, port: int, log_fn) -> None:
     """
-    Probe ZMQ service; optionally try to start it via SSH. Exit process with clear message if failed.
-    Env:
-      ZMQ_REMOTE_SSH           e.g. wheeltec@192.168.31.142 (if set, try SSH start on first failure)
-      ZMQ_REMOTE_SSH_PASSWORD  optional; if set, use sshpass for non-interactive SSH (install sshpass in image)
-      ZMQ_REMOTE_ENV           remote conda/venv name (default gRPC); used in default ZMQ_REMOTE_START_CMD as %(env)s
-      ZMQ_REMOTE_START_CMD     default runs script in conda env gRPC: "cd ... && nohup conda run -n %(env)s python ... &"
-      ZMQ_PROBE_TIMEOUT_MS     default 5000
-      ZMQ_RETRY_COUNT          default 5
-      ZMQ_RETRY_DELAY_SEC      default 3
+    Probe ZMQ service with retries. Exit process with clear message if connection fails.
+    Env: ZMQ_PROBE_TIMEOUT_MS (default 5000), ZMQ_RETRY_COUNT (default 5), ZMQ_RETRY_DELAY_SEC (default 3).
     """
     timeout_ms = int(os.environ.get("ZMQ_PROBE_TIMEOUT_MS", "5000"))
     retry_count = int(os.environ.get("ZMQ_RETRY_COUNT", "5"))
     retry_delay = float(os.environ.get("ZMQ_RETRY_DELAY_SEC", "3"))
-    ssh_target = os.environ.get("ZMQ_REMOTE_SSH", "").strip()
-    remote_env = os.environ.get("ZMQ_REMOTE_ENV", "gRPC").strip()
-    # Default: source conda (common install paths), activate env, then run script (conda not in PATH over SSH)
-    start_cmd_tpl = os.environ.get(
-        "ZMQ_REMOTE_START_CMD",
-        "bash -c 'source ~/miniconda3/etc/profile.d/conda.sh 2>/dev/null || source ~/anaconda3/etc/profile.d/conda.sh 2>/dev/null || source /opt/conda/etc/profile.d/conda.sh 2>/dev/null; conda activate %(env)s && cd /home/wheeltec/grpc/lqtech_grpc_x3plus/python/x3plus && nohup python lqtech_zmq_service.py --port %(port)s &'",
-    ).strip()
-
-    ssh_password = os.environ.get("ZMQ_REMOTE_SSH_PASSWORD", "").strip() or None
 
     for attempt in range(1, retry_count + 1):
         log_fn("[%d/%d] Probing ZMQ service at %s:%d ..." % (attempt, retry_count, host, port))
@@ -168,19 +104,13 @@ def ensure_zmq_connection(host: str, port: int, log_fn) -> None:
             log_fn("ZMQ service at %s:%d is reachable." % (host, port))
             return
         log_fn("Probe failed (connection refused or timeout).")
-        if attempt == 1 and ssh_target and start_cmd_tpl:
-            start_cmd = start_cmd_tpl % {"port": port, "env": remote_env}
-            try_start_remote_service(ssh_target, start_cmd, log_fn, password=ssh_password)
-            log_fn("Waiting %s s for remote service to start ..." % retry_delay)
-            time.sleep(retry_delay)
-        elif attempt < retry_count:
+        if attempt < retry_count:
             log_fn("Retrying in %s s ..." % retry_delay)
             time.sleep(retry_delay)
 
     log_fn("")
     log_fn("FATAL: Could not reach ZMQ service at %s:%d after %d attempts." % (host, port, retry_count))
-    log_fn("  - Ensure lqtech_zmq_service.py (or equivalent) is running on the robot.")
-    log_fn("  - If using SSH auto-start, set ZMQ_REMOTE_SSH and optionally ZMQ_REMOTE_START_CMD.")
+    log_fn("  - Ensure the ZMQ service (e.g. remote_zmq_service container) is running on the robot.")
     log_fn("  - Check connectivity: nc -zv %s %d" % (host, port))
     log_fn("")
     sys.exit(1)
@@ -217,7 +147,7 @@ class ZMQBridgeNode(Node):
             ),
         )
 
-        self._state_timer = self.create_timer(0.02, self._publish_joint_state)
+        self._state_timer = self.create_timer(0.05, self._publish_joint_state)
 
         self.get_logger().info(
             "Bridge: subscribe %s, publish %s" % (JOINT_COMMANDS_TOPIC, JOINT_STATES_TOPIC)

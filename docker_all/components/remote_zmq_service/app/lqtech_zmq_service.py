@@ -9,7 +9,8 @@ Protocol (JSON):
     setJointPositionSingle: "joint_name": str, "joint_value": int
   Response: {"joint_array": [...]} | {"result": "OK"} | {"error": "message"}
 
-Serial permission: run with sudo chmod a+rw /dev/ttyUSB0 first, or sudo python ...
+Serial device: set SERIAL_DEVICE (e.g. /dev/ttyUSB0) or pass --device; default /dev/ttyUSB0.
+When running in Docker, pass the host serial port with: --device /dev/ttyUSB0:/dev/ttyUSB0
 """
 
 import json
@@ -34,6 +35,18 @@ except ImportError:
     SerialException = Exception
 
 DEFAULT_PORT = 5555
+DEFAULT_SERIAL = "/dev/ttyUSB0"
+
+
+def get_serial_device():
+    """Serial device from SERIAL_DEVICE env or --device arg or default."""
+    dev = os.environ.get("SERIAL_DEVICE")
+    if dev:
+        return dev
+    for i, arg in enumerate(sys.argv):
+        if arg == "--device" and i + 1 < len(sys.argv):
+            return sys.argv[i + 1]
+    return DEFAULT_SERIAL
 
 
 def get_port():
@@ -49,16 +62,17 @@ def get_port():
 class RosmasterZMQHandler:
     def __init__(self):
         self.joint_name_to_sid_map = {"arm_joint1": 1}
-        print("service initializing")
+        serial_dev = get_serial_device()
+        print("service initializing (serial=%s)" % serial_dev)
         try:
-            self.serial = Rosmaster(car_type=2, com="/dev/ttyUSB0", debug=False)
+            self.serial = Rosmaster(car_type=2, com=serial_dev, debug=False)
         except SerialException as e:
             if "Permission denied" in str(e) or "Errno 13" in str(e):
                 print(
                     "Permission denied opening serial port. Run with: "
-                    "sudo chmod a+rw /dev/ttyUSB0 && python lqtech_zmq_service.py"
+                    "sudo chmod a+rw %s" % serial_dev
                 )
-                print("Or: sudo python lqtech_zmq_service.py")
+                print("Or run container with --privileged or ensure device is readable.")
             else:
                 print("Serial open failed: %s" % e)
             raise

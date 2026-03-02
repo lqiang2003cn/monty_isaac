@@ -63,4 +63,4 @@ RUN echo 'source /opt/ros/jazzy/setup.bash 2>/dev/null || true' > /etc/profile.d
 COPY --chmod=755 components/ros2_comp/entrypoint.sh /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["ros2", "launch", "monty_demo", "x3plus_bringup.launch.py"]
+CMD ["ros2", "launch", "monty_demo", "opus_x3plus_bringup.launch.py"]
