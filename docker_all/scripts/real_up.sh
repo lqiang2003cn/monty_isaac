@@ -5,8 +5,8 @@
 # and runs the container. No Docker Hub on Orin required.
 #
 # Usage (from repo root or docker_all):
-#   ./docker_all/scripts/real_up.sh up --build
-#   ./scripts/real_up.sh up -d --build   # from docker_all
+#   ./scripts/real_up.sh                  # no args = up --build (start everything, logs in terminal)
+#   ./scripts/real_up.sh up -d --build    # detached (no logs in terminal)
 #
 # Env (optional):
 #   REMOTE_ORIN_HOST     default wheeltec@192.168.31.142; override if different
@@ -137,4 +137,9 @@ run_remote_build() {
 
 run_remote_build
 cd "$DOCKER_ALL"
+# If no args (or only empty arg), default to "up --build" so logs stream to terminal
+if [[ $# -eq 0 ]] || { [[ $# -eq 1 ]] && [[ -z "${1:-}" ]]; }; then
+  echo "[real_up] No arguments: starting local stack (docker compose --profile real up --build). Logs will stream below."
+  set -- up --build
+fi
 exec docker compose --profile real "$@"

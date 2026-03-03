@@ -35,10 +35,28 @@ any move and was perpetually lagging behind.
   command arrives, so it smoothly redirects without stopping. This avoids the
   accelerate-stop-accelerate-stop jerkiness that would occur if run_time exactly
   equaled the command period (50 ms).
-- The rule: run_time ≈ 1.0-1.2x the command period for smooth streaming.
+- The rule: run_time ≈ 1.0-1.2x the command period for smooth streaming. If motion is jerky, try more overlap (e.g. run_time 80 ms for 50 ms period) so the servo is still moving when the next command arrives.
 
 ### Files changed
 - opus_x3plus_controllers.yaml: update_rate, state_publish_rate
 - lqtech_zmq_service.py: run_time in set_joint_position_array and set_joint_position_single
 - zmq_bridge_node.py: state timer period
 - opus_x3plus_real_bridge.py: servo_run_time_ms default
+
+---
+
+## Smoother motion: more overlap (servo_run_time_ms 60→80 ms)
+
+### Problem
+With the above settings (20 Hz, run_time 60 ms), the robot moved correctly but motion was a little jerky—not smooth.
+
+### Cause
+Command period is 50 ms (20 Hz). With run_time 60 ms the overlap is only 10 ms: the next command often arrived when the servo was almost done, so it would briefly settle then redirect, giving a stop-and-go feel.
+
+### Fix
+- opus_x3plus_real_bridge: **servo_run_time_ms** default **60 → 80 ms**.
+
+With 80 ms run_time, when the next command arrives at 50 ms the servo is still in the last 30 ms of its move, so it blends into the new target instead of stopping and restarting. Motion is much smoother.
+
+### If still jerky
+Try more overlap: e.g. **servo_run_time_ms := 100** (launch arg or parameter). Keep run_time within the servo’s allowed range (e.g. max 2000 ms).

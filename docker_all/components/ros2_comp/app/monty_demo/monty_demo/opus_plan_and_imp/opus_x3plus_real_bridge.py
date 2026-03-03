@@ -39,7 +39,8 @@ class OpusX3PlusRealBridge(Node):
         self.declare_parameter("serial_port", "/dev/ttyUSB0")
         self.declare_parameter("baud_rate", 115200)
         self.declare_parameter("state_publish_hz", 20.0)
-        self.declare_parameter("servo_run_time_ms", 60)
+        # Run_time > command period (50 ms at 20 Hz) for overlap: servo still moving when next cmd arrives = smoother motion
+        self.declare_parameter("servo_run_time_ms", 80)
         serial_port = self.get_parameter("serial_port").get_parameter_value().string_value
         state_hz = self.get_parameter("state_publish_hz").get_parameter_value().double_value
         self._run_time_ms = int(self.get_parameter("servo_run_time_ms").value)

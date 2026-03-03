@@ -5,9 +5,15 @@ Here is my vision:
 3. for now, i have to components: isaac_comp and ros2_comp and ros2_comp, they communicate using ros2 bridge
 4. use docker compose to configure running instances of the system.
 
-# run with profile
-docker compose --profile real up --build
+# now run the following in docker_all folder to start everything:
+./scripts/real_up.sh
 
+# run the script in docker_all folder to send message:
+docker compose exec ros2_comp bash -l -c "python3 /scripts/send_first_joint_trajectory.py"
+
+
+# run with profile
+# docker compose --profile real up --build
 
 # rebuild
 docker compose down && docker compose up --build
@@ -27,6 +33,3 @@ ros2 action send_goal /joint_trajectory_controller/follow_joint_trajectory \
     ]
   }}"
 
-# run script to send message (must run from docker_all/; use -l for login shell so ROS is sourced)
-cd docker_all
-docker compose exec ros2_comp bash -l -c "python3 /scripts/send_first_joint_trajectory.py"

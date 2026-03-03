@@ -85,6 +85,8 @@ class SendFirstJointTrajectory(Node):
         pos_current = list(self._current_positions)
         pos_half_pi = [math.pi / 2] + others
         pos_neg_half_pi = [-math.pi / 2] + others
+        pos_quarter_pi = [math.pi / 4] + others
+        pos_neg_quarter_pi = [-math.pi / 4] + others
         zero_vel = [0.0] * len(JOINT_NAMES)
 
         goal_msg = FollowJointTrajectory.Goal()
@@ -106,6 +108,16 @@ class SendFirstJointTrajectory(Node):
                 velocities=zero_vel,
                 time_from_start=Duration(sec=2 * MOVE_SEC, nanosec=0),
             ),
+            JointTrajectoryPoint(
+                positions=pos_quarter_pi,
+                velocities=zero_vel,
+                time_from_start=Duration(sec=3 * MOVE_SEC, nanosec=0),
+            ),
+            JointTrajectoryPoint(
+                positions=pos_neg_quarter_pi,
+                velocities=zero_vel,
+                time_from_start=Duration(sec=4 * MOVE_SEC, nanosec=0),
+            ),
         ]
 
         self.get_logger().info("Waiting for action server %s ..." % ACTION_NAME)
@@ -114,7 +126,8 @@ class SendFirstJointTrajectory(Node):
             return False
 
         self.get_logger().info(
-            "Sending goal: joint1 -> pi/2 (%ds) -> -pi/2 (%ds)" % (MOVE_SEC, 2 * MOVE_SEC)
+            "Sending goal: joint1 -> pi/2 (%ds) -> -pi/2 (%ds) -> pi/4 (%ds) -> -pi/4 (%ds)"
+            % (MOVE_SEC, 2 * MOVE_SEC, 3 * MOVE_SEC, 4 * MOVE_SEC)
         )
         future = self._action_client.send_goal_async(goal_msg)
         rclpy.spin_until_future_complete(self, future, timeout_sec=5.0)
@@ -129,7 +142,7 @@ class SendFirstJointTrajectory(Node):
         result_future = goal_handle.get_result_async()
         self.get_logger().info("Goal accepted, waiting for result...")
         rclpy.spin_until_future_complete(
-            self, result_future, timeout_sec=2 * MOVE_SEC + 10.0
+            self, result_future, timeout_sec=4 * MOVE_SEC + 10.0
         )
         if not result_future.done():
             self.get_logger().warn("Result wait timed out (trajectory may still be running)")

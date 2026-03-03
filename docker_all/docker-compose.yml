@@ -37,7 +37,10 @@ services:
       dockerfile: components/zmq_bridge_comp/Dockerfile
     image: monty_zmq_bridge_comp:latest
     profiles: ["real"]
+    tty: true
+    stdin_open: true
     environment:
+      PYTHONUNBUFFERED: "1"
       ZMQ_HOST: ${ZMQ_HOST:-192.168.31.142}
       ZMQ_PORT: ${ZMQ_PORT:-5555}
       ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
@@ -50,7 +53,10 @@ services:
       context: .
       dockerfile: components/ros2_comp/Dockerfile
     image: monty_ros2_comp:latest
+    tty: true
+    stdin_open: true
     environment:
+      PYTHONUNBUFFERED: "1"
       ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
       RMW_IMPLEMENTATION: rmw_fastrtps_cpp
     volumes:
