@@ -1,0 +1,10 @@
+# Kinematics solver config for MoveIt.
+# TRAC-IK with solve_type: Distance is critical for 5-DOF arms — it finds the
+# closest reachable joint configuration instead of failing when the exact 6D
+# pose is not achievable.
+
+arm:
+  kinematics_solver: trac_ik_kinematics_plugin/TRAC_IKKinematicsPlugin
+  kinematics_solver_search_resolution: 0.005
+  kinematics_solver_timeout: 0.05
+  solve_type: Distance

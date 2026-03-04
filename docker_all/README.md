@@ -5,17 +5,17 @@ All source and Docker wiring for the monty_isaac stack live here. Each runtime c
 ## Layout
 
 - **components/** — One folder per Docker component. Each has a `Dockerfile` and optionally `docker-compose.fragment.yml`.
-  - **isaac_comp** — Isaac Sim 5.1 + ROS2 bridge (X3plus arm + gripper). **Self-contained**: all code and resources under `components/isaac_comp/app/` (no dependency on ros2_comp at build time).
+  - **isaac_comp** — Isaac Sim 5.1 + ROS2 bridge (X3plus arm + gripper). Uses **shared/x3plus_isaac** (mounted at `/shared`).
   - **ros2_comp** — ROS2 workspace with `monty_demo`; runs `ros2 launch monty_demo opus_x3plus_bringup.launch.py`.
   - **zmq_bridge_comp** — ROS2–ZMQ bridge; connects to the real robot’s ZMQ service (run on host or in “real” profile).
   - **remote_zmq_service** — ZMQ server + x3plus serial driver; **deploy on the robot machine** (e.g. NVIDIA Orin Nano, ARM64). Run in Docker with `--device /dev/ttyUSB0`. See `components/remote_zmq_service/README.md` for build/run on Orin.
   - **_template** — Scaffold for adding new components (copy, rename, implement).
-- **shared/** — Shared config (e.g. `ros2/` for Fast DDS profile) and scripts.
+- **shared/** — **x3plus_isaac** (URDF + meshes for Isaac Sim) is the single source here; both isaac_comp and ros2_comp use it (mounted at `/shared` in Docker). Optional: `ros2/` for Fast DDS profile.
 - **scripts/** — Host scripts: `build_all.sh`, `run_compose.sh`, `copy_x3plus_from_src.sh`.
 
-**X3plus URDF and meshes** live under `components/ros2_comp/app/monty_demo/`:
-- **x3plus_robot/** — URDF/xacro and meshes for ROS2 (robot_state_publisher, ros2_control). Installed to `share/monty_demo/urdf` and `share/monty_demo/meshes` (package URL: `package://monty_demo/meshes/...`).
-- **monty_demo/x3plus_isaac/** — URDF and meshes for Isaac Sim (relative `../meshes/`). **isaac_comp** has its own copy under `components/isaac_comp/app/monty_demo/x3plus_isaac/` and does not depend on ros2_comp.
+**X3plus URDF and meshes:**
+- **shared/x3plus_isaac/** — **Single source** for Isaac Sim: `urdf/x3plus_isaac.urdf` and `meshes/`. Mounted at `/shared` for isaac_comp and ros2_comp. Use `X3PLUS_DESCRIPTION_DIR` to override (e.g. `/shared/x3plus_isaac`).
+- **components/ros2_comp/.../x3plus_robot/** — URDF/xacro and meshes for ROS2 (robot_state_publisher, ros2_control). Installed to `share/monty_demo/urdf` and `share/monty_demo/meshes` (package URL: `package://monty_demo/meshes/...`).
 
 To refresh the description from the repo’s `src/`, run `./scripts/copy_x3plus_from_src.sh [SOURCE_DIR]`. Put the x3plus package (e.g. `lqtech_ros2_x3plus` with `urdf/` and `meshes/`) in `src/` or pass its path.
 

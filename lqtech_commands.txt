@@ -1,17 +1,44 @@
+
+
+
+
+
+make a plan to:
+1. install moveit to my system properly
+2. utilize the hardware of the 5dof robot in a maximal and optimal way, meaing:
+use the @
+
+
+
+
+
+
+
+
 now, the dom is ok, i want to embrace docker, all in docker.
 Here is my vision:
 1. a dynamic architecture using docker, each component is a docker image
 2. each component communicate using  various protocols: ros2 bridge, zmq etc as needed
-3. for now, i have to components: isaac_comp and ros2_comp and ros2_comp, they communicate using ros2 bridge
+3. for now, i have two components: isaac_comp and ros2_comp and ros2_comp, they communicate using ros2 bridge
 4. use docker compose to configure running instances of the system.
 
-# now run the following in docker_all folder to start everything:
+########################################################################
+################## real ##################
+# start all
 ./scripts/real_up.sh
 
-# run the script in docker_all folder to send message:
+# send message
 docker compose exec ros2_comp bash -l -c "python3 /scripts/send_first_joint_trajectory.py"
 
 
+################## sim ##################
+# start all
+docker compose --profile sim up --build
+########################################################################
+
+
+
+################## old ##################
 # run with profile
 # docker compose --profile real up --build
 

@@ -108,16 +108,12 @@ DEFAULT_GRIP_POS = -0.77  # grip_joint open position
 DEFAULT_ARM_GRIP_POSITIONS = [0.0, 0.0, 0.0, 0.0, 0.0, DEFAULT_GRIP_POS]
 
 
-SHARED_DESCRIPTION_DIR = Path(_os.environ.get("X3PLUS_DESCRIPTION_DIR", "/shared/x3plus_isaac"))
+# Single source: docker_all/shared/x3plus_isaac (mounted at /shared in Docker)
+X3PLUS_DESCRIPTION_DIR = Path(_os.environ.get("X3PLUS_DESCRIPTION_DIR", "/shared/x3plus_isaac"))
 
 
 def _get_urdf_path() -> Path:
-    shared = SHARED_DESCRIPTION_DIR / "urdf" / "x3plus_isaac.urdf"
-    if shared.is_file():
-        return shared.resolve()
-    # Fallback: baked-in copy next to this script
-    pkg_dir = Path(__file__).resolve().parent
-    return (pkg_dir / "x3plus_isaac" / "urdf" / "x3plus_isaac.urdf").resolve()
+    return (X3PLUS_DESCRIPTION_DIR / "urdf" / "x3plus_isaac.urdf").resolve()
 
 
 def main() -> None:
@@ -128,7 +124,7 @@ def main() -> None:
     meshes_dir = urdf_path.parent.parent / "meshes"
     if not (meshes_dir / "X3plus").exists() and not (meshes_dir / "sensor").exists():
         print(f"Warning: meshes not found under {meshes_dir}")
-        print("Ensure shared/x3plus_isaac/meshes/ is populated.")
+        print("Populate shared/x3plus_isaac/meshes/ (see docker_all/shared/x3plus_isaac/meshes/README.md).")
 
     print(f"URDF loaded from: {urdf_path}")
     print(f"Meshes dir:       {meshes_dir}")

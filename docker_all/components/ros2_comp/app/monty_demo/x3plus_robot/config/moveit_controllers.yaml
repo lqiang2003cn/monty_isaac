@@ -1,0 +1,19 @@
+# MoveIt controller manager config.
+# Maps MoveIt planning groups to the existing joint_trajectory_controller
+# which already exposes a FollowJointTrajectory action server.
+
+moveit_simple_controller_manager:
+  controller_names:
+    - joint_trajectory_controller
+
+  joint_trajectory_controller:
+    type: FollowJointTrajectory
+    action_ns: follow_joint_trajectory
+    default: true
+    joints:
+      - arm_joint1
+      - arm_joint2
+      - arm_joint3
+      - arm_joint4
+      - arm_joint5
+      - grip_joint

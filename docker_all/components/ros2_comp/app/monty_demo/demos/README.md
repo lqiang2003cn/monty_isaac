@@ -23,7 +23,6 @@ python docker_all/components/ros2_comp/app/monty_demo/demos/hello_isaac.py
 python docker_all/components/ros2_comp/app/monty_demo/demos/isaac_sim_demo.py
 python docker_all/components/ros2_comp/app/monty_demo/demos/isaac_sim_ros2_demo.py
 python docker_all/components/ros2_comp/app/monty_demo/demos/x3plus_isaac_demo.py
-python docker_all/components/ros2_comp/app/monty_demo/demos/dof2_isaac_demo.py
 python docker_all/components/ros2_comp/app/monty_demo/demos/x3plus_isaac_2dof_demo.py
 ```
 
@@ -72,13 +71,9 @@ If the URDF importer reports missing commands, enable the extension **isaacsim.a
 
 **RViz vs Isaac Sim display:** The same URDF can look different because (1) RViz uses `/joint_states` and robot_state_publisher to compute mimic joints from the source joint; (2) Isaac Sim runs physics and requires mimic follower joints to have finite limits (the demo rewrites continuous mimic joints to revolute with limits); (3) default joint positions may differ—the demo sets initial positions to 0 after reset to match RViz. Both use Z-up and meters; the demo sets `distance_scale=1` for the importer.
 
-### 5. dof2_isaac_demo.py - 2-DOF robot arm
+### 5. x3plus_isaac_arm_demo.py - X3plus in Isaac Sim (arm + gripper)
 
-Loads the simple 2-DOF arm from `monty_demo/dof2_robot/urdf/dof2_robot.urdf`. The robot uses **primitive geometry only** (cylinder, box)—no mesh files—so it runs in Isaac Sim with no extra setup.
-
-### 6. x3plus_isaac_arm_demo.py - X3plus in Isaac Sim (arm + gripper)
-
-In `monty_demo/monty_demo/x3plus_isaac_arm_demo.py`. Loads `monty_demo/x3plus_isaac/urdf/x3plus_isaac.urdf`: single URDF for Isaac with relative mesh paths (`../meshes/...`), arm + base + sensors + gripper. Publishes/subscribes to `/x3plus/joint_states` and `/x3plus/joint_commands` for ros2_control (JointStateTopicSystem). Put meshes under `monty_demo/x3plus_isaac/meshes/` (copy or symlink from `x3plus_robot/meshes`); see `monty_demo/x3plus_isaac/meshes/README.md`.
+In `monty_demo/monty_demo/x3plus_isaac_arm_demo.py`. Loads the **single-source** x3plus_isaac URDF from **shared/x3plus_isaac** (mounted at `/shared` in Docker; set `X3PLUS_DESCRIPTION_DIR` to override). Relative mesh paths `../meshes/...`. Publishes/subscribes to `/x3plus/joint_states` and `/x3plus/joint_commands` for ros2_control (JointStateTopicSystem). Populate `docker_all/shared/x3plus_isaac/meshes/`; see `shared/x3plus_isaac/meshes/README.md`.
 
 ## Running Isaac Sim Directly
 

@@ -27,7 +27,8 @@ services:
       RMW_IMPLEMENTATION: rmw_fastrtps_cpp
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
-      - ./shared:/shared:ro
+      # Only mount meshes; URDF is generated at build time inside the image
+      - ./shared/x3plus_isaac/meshes:/shared/x3plus_isaac/meshes:ro
     networks:
       - monty_net
 
@@ -61,6 +62,8 @@ services:
       RMW_IMPLEMENTATION: rmw_fastrtps_cpp
     volumes:
       - ./scripts:/scripts:ro
+      # Only mount meshes; URDF is generated at build time inside the image
+      - ./shared/x3plus_isaac/meshes:/shared/x3plus_isaac/meshes:ro
     networks:
       - monty_net
     # Start bringup after either isaac_comp (sim) or zmq_bridge_comp (real) is up

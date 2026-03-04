@@ -1,5 +1,7 @@
-# shared/ is mounted at runtime via docker-compose volumes — never COPYd into images.
+# shared/ is mounted at runtime via docker-compose volumes — generally not COPYd into images.
+# Exception: meshes are needed at build time for the ros2_comp ROS2 package install.
 shared/
+!shared/x3plus_isaac/meshes/
 
 # Utility scripts not needed inside containers
 scripts/

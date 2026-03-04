@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SRDF for the X3plus 5-DOF arm + parallel gripper.
+     Generated manually; refine with MoveIt Setup Assistant if needed. -->
+<robot name="x3plus" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+    <!-- Virtual joint: anchor base_footprint to the world frame -->
+    <virtual_joint name="virtual_joint" type="fixed"
+                   parent_frame="world" child_link="base_footprint"/>
+
+    <!-- ═══ Planning Groups ═══ -->
+
+    <!-- Arm: 5-DOF chain from base_link to arm_link5 -->
+    <group name="arm">
+        <chain base_link="base_link" tip_link="arm_link5"/>
+    </group>
+
+    <!-- Gripper: single actuated joint; mimic joints are passive -->
+    <group name="gripper">
+        <joint name="grip_joint"/>
+    </group>
+
+    <!-- ═══ End-Effector ═══ -->
+    <end_effector name="gripper" parent_link="arm_link5"
+                  group="gripper" parent_group="arm"/>
+
+    <!-- ═══ Named Poses ═══ -->
+    <group_state name="home" group="arm">
+        <joint name="arm_joint1" value="0.0"/>
+        <joint name="arm_joint2" value="0.0"/>
+        <joint name="arm_joint3" value="0.0"/>
+        <joint name="arm_joint4" value="0.0"/>
+        <joint name="arm_joint5" value="0.0"/>
+    </group_state>
+
+    <group_state name="gripper_open" group="gripper">
+        <joint name="grip_joint" value="0.0"/>
+    </group_state>
+
+    <group_state name="gripper_closed" group="gripper">
+        <joint name="grip_joint" value="-1.5"/>
+    </group_state>
+
+    <!-- ═══ Self-Collision Disable Matrix ═══
+         Pairs are disabled for one of:
+           Adjacent  — connected by a joint
+           Fixed     — connected by a fixed joint (sensor mounts, base)
+           Never     — geometry can never collide given joint limits
+    -->
+
+    <!-- Fixed joints -->
+    <disable_collisions link1="base_footprint" link2="base_link" reason="Fixed"/>
+    <disable_collisions link1="base_link" link2="camera_link" reason="Fixed"/>
+    <disable_collisions link1="base_link" link2="laser_link" reason="Fixed"/>
+    <disable_collisions link1="base_link" link2="imu_link" reason="Fixed"/>
+    <disable_collisions link1="arm_link4" link2="mono_link" reason="Fixed"/>
+
+    <!-- Adjacent joints (arm chain) -->
+    <disable_collisions link1="base_link" link2="arm_link1" reason="Adjacent"/>
+    <disable_collisions link1="arm_link1" link2="arm_link2" reason="Adjacent"/>
+    <disable_collisions link1="arm_link2" link2="arm_link3" reason="Adjacent"/>
+    <disable_collisions link1="arm_link3" link2="arm_link4" reason="Adjacent"/>
+    <disable_collisions link1="arm_link4" link2="arm_link5" reason="Adjacent"/>
+
+    <!-- Adjacent joints (gripper — arm_link5 to finger links) -->
+    <disable_collisions link1="arm_link5" link2="rlink1" reason="Adjacent"/>
+    <disable_collisions link1="arm_link5" link2="rlink3" reason="Adjacent"/>
+    <disable_collisions link1="arm_link5" link2="llink1" reason="Adjacent"/>
+    <disable_collisions link1="arm_link5" link2="llink3" reason="Adjacent"/>
+    <disable_collisions link1="rlink1" link2="rlink2" reason="Adjacent"/>
+    <disable_collisions link1="llink1" link2="llink2" reason="Adjacent"/>
+
+    <!-- Gripper finger pairs that are always close but designed not to collide -->
+    <disable_collisions link1="rlink1" link2="rlink3" reason="Never"/>
+    <disable_collisions link1="llink1" link2="llink3" reason="Never"/>
+    <disable_collisions link1="rlink1" link2="llink1" reason="Never"/>
+    <disable_collisions link1="rlink2" link2="llink2" reason="Never"/>
+    <disable_collisions link1="rlink3" link2="llink3" reason="Never"/>
+    <disable_collisions link1="rlink2" link2="rlink3" reason="Never"/>
+    <disable_collisions link1="llink2" link2="llink3" reason="Never"/>
+    <disable_collisions link1="rlink1" link2="llink2" reason="Never"/>
+    <disable_collisions link1="rlink2" link2="llink1" reason="Never"/>
+    <disable_collisions link1="rlink1" link2="llink3" reason="Never"/>
+    <disable_collisions link1="rlink3" link2="llink1" reason="Never"/>
+    <disable_collisions link1="rlink2" link2="llink3" reason="Never"/>
+    <disable_collisions link1="rlink3" link2="llink2" reason="Never"/>
+
+    <!-- Sensor links vs arm/gripper — sensors are fixed to base, arm is far away -->
+    <disable_collisions link1="camera_link" link2="laser_link" reason="Never"/>
+    <disable_collisions link1="camera_link" link2="imu_link" reason="Never"/>
+    <disable_collisions link1="laser_link" link2="imu_link" reason="Never"/>
+    <disable_collisions link1="camera_link" link2="arm_link1" reason="Never"/>
+    <disable_collisions link1="laser_link" link2="arm_link1" reason="Never"/>
+    <disable_collisions link1="imu_link" link2="arm_link1" reason="Never"/>
+    <disable_collisions link1="camera_link" link2="arm_link2" reason="Never"/>
+    <disable_collisions link1="laser_link" link2="arm_link2" reason="Never"/>
+    <disable_collisions link1="imu_link" link2="arm_link2" reason="Never"/>
+    <disable_collisions link1="camera_link" link2="arm_link3" reason="Never"/>
+    <disable_collisions link1="laser_link" link2="arm_link3" reason="Never"/>
+    <disable_collisions link1="imu_link" link2="arm_link3" reason="Never"/>
+    <disable_collisions link1="camera_link" link2="arm_link4" reason="Never"/>
+    <disable_collisions link1="laser_link" link2="arm_link4" reason="Never"/>
+    <disable_collisions link1="imu_link" link2="arm_link4" reason="Never"/>
+    <disable_collisions link1="camera_link" link2="arm_link5" reason="Never"/>
+    <disable_collisions link1="laser_link" link2="arm_link5" reason="Never"/>
+    <disable_collisions link1="imu_link" link2="arm_link5" reason="Never"/>
+    <disable_collisions link1="mono_link" link2="arm_link3" reason="Never"/>
+    <disable_collisions link1="mono_link" link2="arm_link5" reason="Never"/>
+
+    <!-- base_footprint has no geometry — disable all pairs -->
+    <disable_collisions link1="base_footprint" link2="arm_link1" reason="Never"/>
+    <disable_collisions link1="base_footprint" link2="camera_link" reason="Never"/>
+    <disable_collisions link1="base_footprint" link2="laser_link" reason="Never"/>
+    <disable_collisions link1="base_footprint" link2="imu_link" reason="Never"/>
+
+    <!-- Non-adjacent arm links that can never collide due to small geometry -->
+    <disable_collisions link1="arm_link1" link2="arm_link3" reason="Never"/>
+    <disable_collisions link1="arm_link1" link2="arm_link4" reason="Never"/>
+    <disable_collisions link1="arm_link1" link2="arm_link5" reason="Never"/>
+    <disable_collisions link1="arm_link2" link2="arm_link4" reason="Never"/>
+    <disable_collisions link1="arm_link2" link2="arm_link5" reason="Never"/>
+    <disable_collisions link1="arm_link3" link2="arm_link5" reason="Never"/>
+
+    <!-- Sensor links vs gripper — never anywhere near each other -->
+    <disable_collisions link1="camera_link" link2="rlink1" reason="Never"/>
+    <disable_collisions link1="camera_link" link2="rlink2" reason="Never"/>
+    <disable_collisions link1="camera_link" link2="rlink3" reason="Never"/>
+    <disable_collisions link1="camera_link" link2="llink1" reason="Never"/>
+    <disable_collisions link1="camera_link" link2="llink2" reason="Never"/>
+    <disable_collisions link1="camera_link" link2="llink3" reason="Never"/>
+    <disable_collisions link1="laser_link" link2="rlink1" reason="Never"/>
+    <disable_collisions link1="laser_link" link2="rlink2" reason="Never"/>
+    <disable_collisions link1="laser_link" link2="rlink3" reason="Never"/>
+    <disable_collisions link1="laser_link" link2="llink1" reason="Never"/>
+    <disable_collisions link1="laser_link" link2="llink2" reason="Never"/>
+    <disable_collisions link1="laser_link" link2="llink3" reason="Never"/>
+    <disable_collisions link1="imu_link" link2="rlink1" reason="Never"/>
+    <disable_collisions link1="imu_link" link2="rlink2" reason="Never"/>
+    <disable_collisions link1="imu_link" link2="rlink3" reason="Never"/>
+    <disable_collisions link1="imu_link" link2="llink1" reason="Never"/>
+    <disable_collisions link1="imu_link" link2="llink2" reason="Never"/>
+    <disable_collisions link1="imu_link" link2="llink3" reason="Never"/>
+    <disable_collisions link1="mono_link" link2="rlink1" reason="Never"/>
+    <disable_collisions link1="mono_link" link2="rlink2" reason="Never"/>
+    <disable_collisions link1="mono_link" link2="rlink3" reason="Never"/>
+    <disable_collisions link1="mono_link" link2="llink1" reason="Never"/>
+    <disable_collisions link1="mono_link" link2="llink2" reason="Never"/>
+    <disable_collisions link1="mono_link" link2="llink3" reason="Never"/>
+
+</robot>

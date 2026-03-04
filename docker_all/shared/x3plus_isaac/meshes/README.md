@@ -1,22 +1,17 @@
-# Meshes for x3plus_isaac
+# Meshes for x3plus (canonical location)
 
-The URDF `../urdf/x3plus_isaac.urdf` references meshes with paths relative to `urdf/`, e.g. `../meshes/X3plus/visual/base_link.STL`.
+This is the **single source** for X3plus mesh files used by both Isaac Sim and ROS2.
 
-**Setup:** Copy or symlink the mesh files so that this directory contains:
+- Isaac Sim: URDF at `../urdf/x3plus_isaac.urdf` references meshes via relative paths (`../meshes/...`).
+- ROS2: The ros2_comp Dockerfile COPYs these meshes into the ROS2 package build at `share/monty_demo/meshes/`.
+
+Expected layout:
 
 - `X3plus/visual/` and `X3plus/collision/` — base_link, arm_link1–5, rlink1–3, llink1–3 (gripper)
 - `sensor/visual/` and `sensor/collision/` — camera_link, laser_link, mono_link
 
-From **docker_all** (x3plus_isaac lives in `components/ros2_comp/app/monty_demo/monty_demo/x3plus_isaac/`):
+To populate from an external source package:
 
 ```bash
-# Copy from x3plus_robot in this repo
-cp -r components/ros2_comp/app/monty_demo/x3plus_robot/meshes/* components/ros2_comp/app/monty_demo/monty_demo/x3plus_isaac/meshes/
-
-# Or symlink (if x3plus_robot has meshes)
-cd components/ros2_comp/app/monty_demo/monty_demo/x3plus_isaac/meshes
-ln -s ../../../x3plus_robot/meshes/X3plus ./
-ln -s ../../../x3plus_robot/meshes/sensor ./
+./scripts/copy_x3plus_from_src.sh [SOURCE_DIR]
 ```
-
-A full copy from `x3plus_robot/meshes` includes all arm and gripper meshes.

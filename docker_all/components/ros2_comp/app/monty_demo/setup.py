@@ -19,18 +19,29 @@ setup(
     name=package_name,
     version="0.1.0",
     packages=find_packages(exclude=["test"]),
-    package_data={
-        package_name: [
-            "x3plus_isaac/urdf/*.urdf",
-            "x3plus_isaac/meshes/**/*.STL",
-            "x3plus_isaac/meshes/**/*.stl",
-        ],
-    },
+    # x3plus_isaac: single source at docker_all/shared/x3plus_isaac (mounted at /shared in Docker)
+    package_data={package_name: []},
     data_files=[
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
         ("share/" + package_name, ["package.xml"]),
-        ("share/" + package_name + "/config", ["opus_plan_and_imp/config/opus_x3plus_controllers.yaml"]),
-        ("share/" + package_name + "/launch", ["opus_plan_and_imp/launch/opus_x3plus_bringup.launch.py"]),
+        (
+            "share/" + package_name + "/config",
+            [
+                "opus_plan_and_imp/config/opus_x3plus_controllers.yaml",
+                "x3plus_robot/config/x3plus.srdf",
+                "x3plus_robot/config/kinematics.yaml",
+                "x3plus_robot/config/joint_limits.yaml",
+                "x3plus_robot/config/moveit_controllers.yaml",
+                "x3plus_robot/config/ompl_planning.yaml",
+            ],
+        ),
+        (
+            "share/" + package_name + "/launch",
+            [
+                "opus_plan_and_imp/launch/opus_x3plus_bringup.launch.py",
+                "opus_plan_and_imp/launch/x3plus_moveit.launch.py",
+            ],
+        ),
         (
             "share/" + package_name + "/urdf",
             ["x3plus_robot/urdf/x3plus.urdf.xacro", "x3plus_robot/urdf/ros2_control_topic.xacro"],
@@ -49,6 +60,7 @@ setup(
             "listener = monty_demo.listener_node:main",
             "robot_description_publisher = monty_demo.robot_description_publisher_node:main",
             "opus_x3plus_real_bridge = monty_demo.opus_plan_and_imp.opus_x3plus_real_bridge:main",
+            "x3plus_5dof_planner = monty_demo.x3plus_5dof_planner:main",
         ],
     },
 )

@@ -60,3 +60,33 @@ With 80 ms run_time, when the next command arrives at 50 ms the servo is still i
 
 ### If still jerky
 Try more overlap: e.g. **servo_run_time_ms := 100** (launch arg or parameter). Keep run_time within the servo’s allowed range (e.g. max 2000 ms).
+
+---
+
+## Future: Mobile base rotation as the 6th DOF
+
+### Context
+The X3plus arm has only 5 DOF (1 yaw + 3 pitch + 1 wrist roll). It cannot
+independently control gripper yaw — the gripper always faces radially outward
+from the base center. This means full 6D pose targets (position + arbitrary
+orientation) are generally unsolvable with the arm alone.
+
+### Idea
+Use the wheeled mobile base as an effective "joint 0." Before the arm
+manipulates, Nav2 drives and **rotates** the car so the arm's forward
+direction roughly faces the target. Then joint 1 (±90°) handles fine yaw
+adjustment. This gives full 360° horizontal approach capability.
+
+### Workflow
+1. Nav2 navigates + rotates the car to a pre-computed pose near the target.
+2. Arm joint 1 makes fine yaw correction.
+3. Arm joints 2-4 handle reach + height + pitch.
+4. Joint 5 handles roll.
+5. Gripper closes.
+
+### Implementation approaches
+- **Simple (recommended first):** sequential — Nav2 moves, then stops, then
+  MoveIt plans the arm. Treat base and arm as independent.
+- **Advanced:** whole-body planning — add a virtual planar joint (world ->
+  base_footprint) in the MoveIt SRDF, let the planner reason about base
+  placement and arm configuration simultaneously.

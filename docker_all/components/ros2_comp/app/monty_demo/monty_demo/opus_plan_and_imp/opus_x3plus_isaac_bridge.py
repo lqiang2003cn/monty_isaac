@@ -117,10 +117,12 @@ DEFAULT_ARM_GRIP_POSITIONS = [0.0, 0.0, 0.0, 0.0, 0.0, DEFAULT_GRIP_POS]
 # Mimic list in order for iteration
 GRIPPER_MIMIC = [(name, MIMIC_MAP[name][1]) for name in JOINT_NAMES if name in MIMIC_MAP]
 
+# Single source: docker_all/shared/x3plus_isaac (mounted at /shared in Docker)
+X3PLUS_DESCRIPTION_DIR = Path(_os.environ.get("X3PLUS_DESCRIPTION_DIR", "/shared/x3plus_isaac"))
+
 
 def _get_urdf_path() -> Path:
-    pkg_dir = Path(__file__).resolve().parent
-    return (pkg_dir.parent / "x3plus_isaac" / "urdf" / "x3plus_isaac.urdf").resolve()
+    return (X3PLUS_DESCRIPTION_DIR / "urdf" / "x3plus_isaac.urdf").resolve()
 
 
 def main() -> None:
@@ -131,7 +133,7 @@ def main() -> None:
     meshes_dir = urdf_path.parent.parent / "meshes"
     if not (meshes_dir / "X3plus").exists() and not (meshes_dir / "sensor").exists():
         print(f"Warning: meshes not found under {meshes_dir}")
-        print("Copy or symlink from x3plus_robot/meshes (see x3plus_isaac/meshes/README.md)")
+        print("Populate shared/x3plus_isaac/meshes/ (see docker_all/shared/x3plus_isaac/meshes/README.md)")
 
     print("\nIsaac Sim started. Creating world and importing X3plus (arm + gripper) URDF...")
 
@@ -166,7 +168,7 @@ def main() -> None:
         result = False
         robot_model = None
     if not result or robot_model is None:
-        raise RuntimeError("URDFParseFile failed. Check URDF and that meshes exist under x3plus_isaac/meshes/.")
+        raise RuntimeError("URDFParseFile failed. Check shared/x3plus_isaac/ (URDF + meshes).")
 
     try:
         for name, joint in robot_model.joints.items():

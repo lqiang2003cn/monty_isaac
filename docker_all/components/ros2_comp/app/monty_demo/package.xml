@@ -19,6 +19,11 @@
   <depend>ros2_controllers</depend>
   <depend>joint_state_topic_hardware_interface</depend>
   <depend>xacro</depend>
+  <depend>moveit_ros_move_group</depend>
+  <depend>moveit_ros_planning_interface</depend>
+  <depend>moveit_planners_ompl</depend>
+  <depend>trac_ik_kinematics_plugin</depend>
+  <exec_depend>moveit_configs_utils</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>

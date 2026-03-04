@@ -16,8 +16,9 @@ import subprocess
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.conditions import IfCondition
+from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 
@@ -34,17 +35,26 @@ def generate_launch_description():
     controllers_yaml = os.path.join(pkg_dir, "config", "opus_x3plus_controllers.yaml")
 
     robot_description_full = subprocess.check_output(
-        ["xacro", urdf_xacro],
+        ["xacro", urdf_xacro, "robot_name:=x3plus"],
         text=True,
         cwd=urdf_dir,
     )
     robot_description_urdf_only = _strip_ros2_control(robot_description_full)
 
     mode_is_real = PythonExpression(["'", LaunchConfiguration("mode"), "' == 'real'"])
+    use_moveit = LaunchConfiguration("use_moveit")
+
+    moveit_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(pkg_dir, "launch", "x3plus_moveit.launch.py")
+        ),
+        condition=IfCondition(use_moveit),
+    )
 
     return LaunchDescription([
         DeclareLaunchArgument("mode", default_value="isaac", description="isaac or real"),
         DeclareLaunchArgument("serial_port", default_value="/dev/ttyUSB0", description="Serial port for real robot"),
+        DeclareLaunchArgument("use_moveit", default_value="false", description="Launch MoveIt move_group"),
         Node(
             package="robot_state_publisher",
             executable="robot_state_publisher",
@@ -99,4 +109,5 @@ def generate_launch_description():
                 {"serial_port": LaunchConfiguration("serial_port")},
             ],
         ),
+        moveit_launch,
     ])

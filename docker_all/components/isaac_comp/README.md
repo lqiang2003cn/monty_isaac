@@ -1,14 +1,13 @@
-# isaac_comp — Isaac Sim 5.1 (self-contained)
+# isaac_comp — Isaac Sim 5.1
 
-Runs **Isaac Sim 5.1** with the X3plus arm + gripper demo and ROS2 bridge. This component is **self-contained**: all code and resources live under `app/` and it does not depend on `ros2_comp` at build time.
+Runs **Isaac Sim 5.1** with the X3plus arm + gripper demo and ROS2 bridge. **x3plus_isaac** URDF and meshes: single source at **docker_all/shared/x3plus_isaac**, mounted at `/shared` at runtime.
 
 ## Layout
 
-- **Dockerfile** — Base image `nvcr.io/nvidia/isaac-sim:5.1.0`; copies `app/` into the container.
+- **Dockerfile** — Base image `nvcr.io/nvidia/isaac-sim:5.1.0`; copies `app/` only. URDF + meshes come from the `./shared:/shared` volume.
 - **app/** — Application tree:
   - **app/monty_demo/** — Python package for the Isaac demo.
-  - **app/monty_demo/x3plus_isaac_arm_demo.py** — Entry point (`python -m monty_demo.x3plus_isaac_arm_demo`).
-  - **app/monty_demo/x3plus_isaac/** — X3plus URDF and meshes (arm + gripper) used by Isaac Sim.
+  - **app/monty_demo/x3plus_isaac_arm_demo.py** — Entry point (`python -m monty_demo.x3plus_isaac_arm_demo`). Loads `/shared/x3plus_isaac/urdf/x3plus_isaac.urdf` (override with `X3PLUS_DESCRIPTION_DIR`).
 
 ## Build and run
 

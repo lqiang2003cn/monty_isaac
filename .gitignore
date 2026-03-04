@@ -31,6 +31,9 @@ build/
 install/
 log/
 
+# Generated URDF (regenerate via scripts/generate_isaac_urdf.sh)
+docker_all/shared/x3plus_isaac/urdf/x3plus_isaac.urdf
+
 # Local env (passwords, host overrides) — do not commit
 .env
 docker_all/.env
