@@ -23,7 +23,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         ros-jazzy-moveit \
         ros-jazzy-trac-ik-kinematics-plugin \
         python3-colcon-common-extensions \
-        python3-rosdep
+        python3-rosdep \
+        python3-zmq
 
 WORKDIR /ws
 
@@ -63,7 +64,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         ros-jazzy-joint-state-topic-hardware-interface \
         ros-jazzy-xacro \
         ros-jazzy-moveit \
-        ros-jazzy-trac-ik-kinematics-plugin
+        ros-jazzy-trac-ik-kinematics-plugin \
+        python3-matplotlib \
+        python3-zmq
 
 WORKDIR /workspace
 

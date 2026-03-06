@@ -1,6 +1,6 @@
 # Remote machine (Orin) setup for pulling from local registry
 
-The **local machine** builds the `remote_zmq_service` image and runs a Docker Registry on port 5000. The **Orin** (remote) pulls the image from your machine and runs the container. Do the following **once** on the Orin.
+The **local machine** builds the `remote_real_x3plus` image and runs a Docker Registry on port 5000. The **Orin** (remote) pulls the image from your machine and runs the container. Do the following **once** on the Orin.
 
 ## 1. Allow HTTP registry on the Orin
 

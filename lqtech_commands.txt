@@ -24,10 +24,22 @@ Here is my vision:
 
 ########################################################################
 ################## real ##################
-# start all
+# start all (bringup + MoveIt + planner, streams logs)
+# serial device on Orin is auto-detected (whichever /dev/ttyUSB* exists)
 ./scripts/real_up.sh
 
-# send message
+# --- in another terminal (from docker_all/) ---
+
+# dry-run: plan all 100 motions, arm does NOT move (safe first check)
+docker compose exec ros2_comp bash -l -c "ros2 run monty_demo x3plus_reachability_test --dry-run"
+
+# live: test 5 points first to validate the full chain
+docker compose exec ros2_comp bash -l -c "ros2 run monty_demo x3plus_reachability_test -n 5"
+
+# live: full 100-point reachability test
+docker compose exec ros2_comp bash -l -c "ros2 run monty_demo x3plus_reachability_test"
+
+# old: send raw trajectory (bypasses MoveIt, no collision checking)
 docker compose exec ros2_comp bash -l -c "python3 /scripts/send_first_joint_trajectory.py"
 
 

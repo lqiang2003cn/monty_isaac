@@ -1,3 +1,0 @@
-pyzmq
-pyserial
-numpy

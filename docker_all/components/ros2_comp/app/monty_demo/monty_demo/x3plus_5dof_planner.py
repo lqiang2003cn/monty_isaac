@@ -16,12 +16,14 @@ Works with both Isaac Sim and real robot (same controller stack).
 """
 
 import math
+import time as _time
 from enum import Enum, auto
 
 import numpy as np
 import rclpy
 from rclpy.action import ActionClient
-from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
+from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 
 from moveit_msgs.action import MoveGroup
@@ -204,27 +206,28 @@ class X3plus5DofPlanner(Node):
         super().__init__("x3plus_5dof_planner")
 
         self._action_cb_group = MutuallyExclusiveCallbackGroup()
+        self._service_cb_group = ReentrantCallbackGroup()
+
         self._move_group_client = ActionClient(
             self, MoveGroup, "move_action",
             callback_group=self._action_cb_group,
         )
 
-        # Service: plan to position (x, y, z)
-        # Call with parameters: target_x, target_y, target_z
         self.create_service(
-            Trigger, "~/plan_position", self._plan_position_cb
+            Trigger, "~/plan_position", self._plan_position_cb,
+            callback_group=self._service_cb_group,
         )
-
-        # Service: plan to position + orientation (x, y, z, pitch, roll)
-        # Call with parameters: target_x, y, z, target_pitch, target_roll
         self.create_service(
-            Trigger, "~/plan_position_orient", self._plan_position_orient_cb
+            Trigger, "~/plan_position_orient", self._plan_position_orient_cb,
+            callback_group=self._service_cb_group,
         )
-
-        # Service: plan to full pose
-        # Call with parameters: target_x..z, target_qx..qw
         self.create_service(
-            Trigger, "~/plan_pose", self._plan_pose_cb
+            Trigger, "~/plan_pose", self._plan_pose_cb,
+            callback_group=self._service_cb_group,
+        )
+        self.create_service(
+            Trigger, "~/go_home", self._go_home_cb,
+            callback_group=self._service_cb_group,
         )
 
         # Declare parameters for goal specification
@@ -241,9 +244,18 @@ class X3plus5DofPlanner(Node):
                                ParameterDescriptor(description="Execute after planning"))
 
         self.get_logger().info("X3plus 5-DOF planner ready. Services: "
-                               "~/plan_position, ~/plan_position_orient, ~/plan_pose")
+                               "~/plan_position, ~/plan_position_orient, ~/plan_pose, ~/go_home")
 
     # ── Service callbacks ──
+
+    def _format_result(self, result):
+        """Return result name, appending the MoveIt error code on failure."""
+        msg = result.name
+        if result == PlanResult.PLANNING_FAILED:
+            code = getattr(self, "_last_moveit_error", None)
+            if code is not None:
+                msg += f" (MoveIt error_code={code})"
+        return msg
 
     def _plan_position_cb(self, request, response):
         """Plan to (x, y, z) with orientation free."""
@@ -273,7 +285,7 @@ class X3plus5DofPlanner(Node):
 
         result = self._plan_joint_target(list(joints), execute)
         response.success = (result == PlanResult.SUCCESS)
-        response.message = result.name
+        response.message = self._format_result(result)
         return response
 
     def _plan_position_orient_cb(self, request, response):
@@ -306,7 +318,7 @@ class X3plus5DofPlanner(Node):
 
         result = self._plan_joint_target(list(joints), execute)
         response.success = (result == PlanResult.SUCCESS)
-        response.message = result.name
+        response.message = self._format_result(result)
         return response
 
     def _plan_pose_cb(self, request, response):
@@ -380,8 +392,30 @@ class X3plus5DofPlanner(Node):
         )
         result = self._plan_joint_target(list(best_joints), execute)
         response.success = (result == PlanResult.SUCCESS)
-        response.message = result.name
+        response.message = self._format_result(result)
         return response
+
+    def _go_home_cb(self, request, response):
+        """Return to home (all joints zero) via joint-space planning."""
+        execute = self.get_parameter("execute").value
+        self.get_logger().info("go_home: returning to all-zeros joint configuration")
+        home = [0.0] * len(JOINT_NAMES)
+        result = self._plan_joint_target(home, execute)
+        response.success = (result == PlanResult.SUCCESS)
+        response.message = self._format_result(result)
+        return response
+
+    # ── Helpers ──
+
+    @staticmethod
+    def _wait_for_future(future, timeout_sec):
+        """Poll until *future* completes. Returns True if done, False on timeout."""
+        deadline = _time.monotonic() + timeout_sec
+        while not future.done():
+            if _time.monotonic() > deadline:
+                return False
+            _time.sleep(0.01)
+        return True
 
     # ── MoveIt interface ──
 
@@ -395,8 +429,21 @@ class X3plus5DofPlanner(Node):
 
         req = MotionPlanRequest()
         req.group_name = PLANNING_GROUP
+        req.planner_id = "RRTConnect"
         req.num_planning_attempts = 5
         req.allowed_planning_time = 5.0
+        req.max_velocity_scaling_factor = 0.3
+        req.max_acceleration_scaling_factor = 0.3
+
+        req.start_state.is_diff = True
+
+        req.workspace_parameters.header.frame_id = PLANNING_FRAME
+        req.workspace_parameters.min_corner.x = -1.0
+        req.workspace_parameters.min_corner.y = -1.0
+        req.workspace_parameters.min_corner.z = -1.0
+        req.workspace_parameters.max_corner.x = 1.0
+        req.workspace_parameters.max_corner.y = 1.0
+        req.workspace_parameters.max_corner.z = 1.0
 
         constraints = Constraints()
         for name, val in zip(JOINT_NAMES, joint_values):
@@ -409,6 +456,19 @@ class X3plus5DofPlanner(Node):
             constraints.joint_constraints.append(jc)
 
         req.goal_constraints.append(constraints)
+
+        # Keep arm_joint5 near its goal value during the entire motion to
+        # prevent OMPL from rotating the wrist/gripper along the path.
+        path_constraints = Constraints()
+        jc5 = JointConstraint()
+        jc5.joint_name = "arm_joint5"
+        jc5.position = joint_values[4]
+        jc5.tolerance_above = 0.15
+        jc5.tolerance_below = 0.15
+        jc5.weight = 1.0
+        path_constraints.joint_constraints.append(jc5)
+        req.path_constraints = path_constraints
+
         goal_msg.request = req
 
         planning_opts = PlanningOptions()
@@ -416,7 +476,9 @@ class X3plus5DofPlanner(Node):
         goal_msg.planning_options = planning_opts
 
         future = self._move_group_client.send_goal_async(goal_msg)
-        rclpy.spin_until_future_complete(self, future, timeout_sec=10.0)
+        if not self._wait_for_future(future, timeout_sec=10.0):
+            self.get_logger().error("Timed out waiting for goal acceptance")
+            return PlanResult.PLANNING_FAILED
 
         goal_handle = future.result()
         if goal_handle is None or not goal_handle.accepted:
@@ -424,7 +486,9 @@ class X3plus5DofPlanner(Node):
             return PlanResult.PLANNING_FAILED
 
         result_future = goal_handle.get_result_async()
-        rclpy.spin_until_future_complete(self, result_future, timeout_sec=30.0)
+        if not self._wait_for_future(result_future, timeout_sec=30.0):
+            self.get_logger().error("Timed out waiting for planning result")
+            return PlanResult.PLANNING_FAILED
 
         result = result_future.result()
         if result is None:
@@ -438,14 +502,17 @@ class X3plus5DofPlanner(Node):
             return PlanResult.SUCCESS
         else:
             self.get_logger().error(f"MoveIt error code: {error_code}")
+            self._last_moveit_error = error_code
             return PlanResult.PLANNING_FAILED
 
 
 def main(args=None):
     rclpy.init(args=args)
     node = X3plus5DofPlanner()
+    executor = MultiThreadedExecutor()
+    executor.add_node(node)
     try:
-        rclpy.spin(node)
+        executor.spin()
     except KeyboardInterrupt:
         pass
     finally:

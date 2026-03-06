@@ -24,7 +24,6 @@ any move and was perpetually lagging behind.
 - controller_manager update_rate: 100 → 20 Hz (one command every 50 ms)
 - servo run_time: 2000 → 60 ms (servo motion duration per command)
 - state_publish_rate: 50 → 20 Hz (match control rate)
-- zmq_bridge_node state timer: 0.02s → 0.05s (20 Hz, match control rate)
 - opus_x3plus_real_bridge servo_run_time_ms default: 50 → 60
 
 ### Why these values
@@ -40,7 +39,6 @@ any move and was perpetually lagging behind.
 ### Files changed
 - opus_x3plus_controllers.yaml: update_rate, state_publish_rate
 - lqtech_zmq_service.py: run_time in set_joint_position_array and set_joint_position_single
-- zmq_bridge_node.py: state timer period
 - opus_x3plus_real_bridge.py: servo_run_time_ms default
 
 ---

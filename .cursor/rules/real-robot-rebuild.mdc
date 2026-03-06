@@ -1,0 +1,54 @@
+---
+description: After any code change, ensure ./scripts/real_up.sh rebuilds and restarts correctly for the real robot
+alwaysApply: true
+---
+
+# Real Robot Rebuild Rule
+
+After modifying **any** file that affects the real-robot stack, verify that `./scripts/real_up.sh` will still work by checking the full build chain below.
+
+## Build chain (what real_up.sh does)
+
+1. Optionally syncs/builds `remote_real_x3plus` on the Orin (ZMQ service)
+2. Runs `docker compose up --build` with `ROBOT_MODE=zmq USE_MOVEIT=true`
+3. Docker rebuilds `ros2_comp` image: copies `monty_demo` source → `colcon build` → generates Isaac URDF
+4. Container starts: launches `opus_x3plus_bringup.launch.py` (ros2_control + bridge + MoveIt + planner)
+
+## What to check after each type of change
+
+### Python source (`monty_demo/**/*.py`)
+- Entry point registered in `setup.py` `console_scripts` if adding a new executable
+- Imports resolve (no missing `__init__.py` or uninstalled deps)
+- No syntax errors: run `python3 -c "import ast; ast.parse(open('FILE').read())"` if unsure
+
+### Launch files (`opus_plan_and_imp/launch/*.py`)
+- Node `package` and `executable` match a `console_scripts` entry in `setup.py`
+- Any new `data_files` (configs, URDFs) listed in `setup.py` `data_files`
+- `LaunchConfiguration` args have matching `DeclareLaunchArgument`
+
+### Config files (`.yaml`, `.srdf`, `.xacro`)
+- Listed in `setup.py` `data_files` so `colcon build` installs them
+- YAML keys match what the node/controller expects
+
+### Dockerfile (`components/ros2_comp/Dockerfile`)
+- Build-stage apt packages match runtime-stage packages (except build-only tools like `colcon`)
+- `COPY` paths are relative to `docker_all/` (the build context)
+- New pip/apt dependencies added to both stages if needed at runtime
+
+### docker-compose.yml
+- `command:` still passes all required launch args (`mode`, `use_moveit`, `zmq_host`, `zmq_port`)
+- Environment variables used in `command:` have defaults
+
+### real_up.sh / remote scripts
+- `ROBOT_MODE=zmq` and `USE_MOVEIT=true` are still exported before `docker compose`
+- Remote sync paths match `docker-compose.remote.yml`
+
+## Quick smoke test after rebuild
+
+```bash
+# From docker_all/ — after real_up.sh is running in terminal 1:
+docker compose exec ros2_comp bash -l -c "ros2 node list"
+# Expect: /robot_state_publisher, /controller_manager, /move_group, /x3plus_5dof_planner, /opus_x3plus_zmq_bridge
+docker compose exec ros2_comp bash -l -c "ros2 service list | grep plan_position"
+# Expect: /x3plus_5dof_planner/plan_position
+```

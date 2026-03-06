@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-# Unified bringup for x3plus ros2_control (Isaac Sim or real robot).
+# Unified bringup for x3plus ros2_control (Isaac Sim, real robot, or ZMQ).
 # mode:=isaac -> user runs Isaac bridge separately (needs Isaac venv).
-# mode:=real  -> launches opus_x3plus_real_bridge node.
+# mode:=real  -> launches opus_x3plus_real_bridge node (local USB serial).
+# mode:=zmq   -> launches opus_x3plus_zmq_bridge node (remote robot via ZMQ).
 #
 # use_sim_time is always false: the topic-based hardware interface uses
 # wall-clock timestamps and does not require a /clock publisher. Isaac Sim's
@@ -42,6 +43,7 @@ def generate_launch_description():
     robot_description_urdf_only = _strip_ros2_control(robot_description_full)
 
     mode_is_real = PythonExpression(["'", LaunchConfiguration("mode"), "' == 'real'"])
+    mode_is_zmq = PythonExpression(["'", LaunchConfiguration("mode"), "' == 'zmq'"])
     use_moveit = LaunchConfiguration("use_moveit")
 
     moveit_launch = IncludeLaunchDescription(
@@ -52,8 +54,10 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        DeclareLaunchArgument("mode", default_value="isaac", description="isaac or real"),
-        DeclareLaunchArgument("serial_port", default_value="/dev/ttyUSB0", description="Serial port for real robot"),
+        DeclareLaunchArgument("mode", default_value="isaac", description="isaac, real, or zmq"),
+        DeclareLaunchArgument("serial_port", default_value="/dev/ttyUSB0", description="Serial port for real robot (mode:=real)"),
+        DeclareLaunchArgument("zmq_host", default_value="192.168.31.142", description="ZMQ service host (mode:=zmq)"),
+        DeclareLaunchArgument("zmq_port", default_value="5555", description="ZMQ service port (mode:=zmq)"),
         DeclareLaunchArgument("use_moveit", default_value="false", description="Launch MoveIt move_group"),
         Node(
             package="robot_state_publisher",
@@ -109,5 +113,23 @@ def generate_launch_description():
                 {"serial_port": LaunchConfiguration("serial_port")},
             ],
         ),
+        Node(
+            package="monty_demo",
+            executable="opus_x3plus_zmq_bridge",
+            name="opus_x3plus_zmq_bridge",
+            output="screen",
+            condition=IfCondition(mode_is_zmq),
+            parameters=[
+                {"zmq_host": LaunchConfiguration("zmq_host")},
+                {"zmq_port": LaunchConfiguration("zmq_port")},
+            ],
+        ),
         moveit_launch,
+        Node(
+            package="monty_demo",
+            executable="x3plus_5dof_planner",
+            name="x3plus_5dof_planner",
+            output="screen",
+            condition=IfCondition(use_moveit),
+        ),
     ])
