@@ -63,6 +63,7 @@ setup(
             "opus_x3plus_zmq_bridge = monty_demo.opus_plan_and_imp.opus_x3plus_zmq_bridge:main",
             "x3plus_5dof_planner = monty_demo.x3plus_5dof_planner:main",
             "x3plus_reachability_test = monty_demo.x3plus_reachability_test:main",
+            "straight_line_test = monty_demo.straight_line_test:main",
             "x3plus_joint_check = monty_demo.x3plus_joint_check:main",
         ],
     },

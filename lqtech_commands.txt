@@ -28,8 +28,7 @@ Here is my vision:
 # serial device on Orin is auto-detected (whichever /dev/ttyUSB* exists)
 ./scripts/real_up.sh
 
-# --- in another terminal (from docker_all/) ---
-
+# ----------------------- move in joint space -----------------------
 # dry-run: plan all 100 motions, arm does NOT move (safe first check)
 docker compose exec ros2_comp bash -l -c "ros2 run monty_demo x3plus_reachability_test --dry-run"
 
@@ -41,6 +40,20 @@ docker compose exec ros2_comp bash -l -c "ros2 run monty_demo x3plus_reachabilit
 
 # old: send raw trajectory (bypasses MoveIt, no collision checking)
 docker compose exec ros2_comp bash -l -c "python3 /scripts/send_first_joint_trajectory.py"
+
+
+# ----------------------- move in straight line -----------------------
+# Generate-only (no robot needed, just see the points + path)
+docker compose exec ros2_comp bash -l -c "ros2 run monty_demo straight_line_test --generate-only"
+
+# Dry-run (plan all segments, arm does NOT move)
+docker compose exec ros2_comp bash -l -c "ros2 run monty_demo straight_line_test --dry-run"
+
+# Full test on real robot
+docker compose exec ros2_comp bash -l -c "ros2 run monty_demo straight_line_test"
+
+# Quick 5-segment test first
+docker compose exec ros2_comp bash -l -c "ros2 run monty_demo straight_line_test -n 5"
 
 
 ################## sim ##################

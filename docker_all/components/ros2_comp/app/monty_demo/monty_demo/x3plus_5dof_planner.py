@@ -2,15 +2,21 @@
 """
 X3plus 5-DOF planning wrapper for MoveIt 2.
 
-Exposes three ROS 2 services that accept progressively richer goal types:
+Exposes ROS 2 services that accept progressively richer goal types:
 
   1. ~/plan_position        — (x, y, z) only; orientation is free
   2. ~/plan_position_orient — (x, y, z, pitch, roll); yaw derived from position
   3. ~/plan_pose            — full 6D Pose; rejects only if truly impossible
+  4. ~/plan_straight_line   — straight-line Cartesian path from current pose
+  5. ~/go_home              — return to all-zeros joint configuration
 
-Each service validates the target against the workspace boundary, computes an
-analytical IK solution when applicable, and delegates collision-free path
+Services 1–3 validate the target against the workspace boundary, compute an
+analytical IK solution when applicable, and delegate collision-free path
 planning to MoveIt's move_group via the MoveGroupAction interface.
+
+Service 4 bypasses MoveIt: it interpolates linearly in Cartesian space,
+solves analytical IK at each waypoint, and sends the resulting joint
+trajectory directly to the controller via FollowJointTrajectory.
 
 Works with both Isaac Sim and real robot (same controller stack).
 """
@@ -26,6 +32,8 @@ from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallb
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 
+from builtin_interfaces.msg import Duration
+from control_msgs.action import FollowJointTrajectory
 from moveit_msgs.action import MoveGroup
 from moveit_msgs.msg import (
     Constraints,
@@ -33,7 +41,9 @@ from moveit_msgs.msg import (
     MotionPlanRequest,
     PlanningOptions,
 )
+from sensor_msgs.msg import JointState
 from std_srvs.srv import Trigger
+from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 from rcl_interfaces.msg import ParameterDescriptor
 
 # ---------------------------------------------------------------------------
@@ -161,6 +171,68 @@ def analytical_ik_5d(x, y, z, pitch, roll):
     return None
 
 
+def analytical_ik_5d_all(x, y, z, pitch, roll):
+    """Like analytical_ik_5d but returns ALL valid (q1..q5) solutions.
+
+    Used by the straight-line planner to pick the solution closest to the
+    previous waypoint, preventing elbow-configuration flips that cause jerky
+    motion.
+    """
+    dx = x - BASE_XY
+    if dx * dx + y * y < 1e-8:
+        return []
+    q1 = -math.atan2(y, dx)
+    if abs(q1) > math.pi / 2:
+        return []
+
+    r = math.sqrt(dx * dx + y * y)
+    h = z - BASE_Z
+    phi = pitch - math.pi / 2
+
+    tx = h - L3 * math.cos(phi) + L3X * math.sin(phi)
+    ty = -(r + L3 * math.sin(phi) + L3X * math.cos(phi))
+
+    d_sq = tx * tx + ty * ty
+    cos_q3 = (d_sq - L1 * L1 - L2 * L2) / (2.0 * L1 * L2)
+    if abs(cos_q3) > 1.0 + 1e-6:
+        return []
+
+    solutions = []
+    for sign in (1.0, -1.0):
+        q3 = sign * math.acos(max(-1.0, min(1.0, cos_q3)))
+        alpha = math.atan2(ty, tx)
+        beta = math.atan2(L2 * math.sin(q3), L1 + L2 * math.cos(q3))
+        q2 = alpha - beta
+        q4 = phi - q2 - q3
+        if (_in_limits("arm_joint2", q2) and
+                _in_limits("arm_joint3", q3) and
+                _in_limits("arm_joint4", q4)):
+            q5 = roll
+            if not _in_limits("arm_joint5", q5):
+                continue
+            solutions.append((q1, q2, q3, q4, q5))
+    return solutions
+
+
+def forward_kinematics_5d(q1, q2, q3, q4, q5):
+    """Compute (x, y, z, pitch, roll) from joint angles.
+
+    Inverse of analytical_ik_5d — uses the same kinematic model so FK→IK
+    round-trips are exact (within floating-point precision).
+    """
+    phi = q2 + q3 + q4
+    r = -(L1 * math.sin(q2) + L2 * math.sin(q2 + q3)) \
+        - L3 * math.sin(phi) - L3X * math.cos(phi)
+    h = L1 * math.cos(q2) + L2 * math.cos(q2 + q3) \
+        + L3 * math.cos(phi) - L3X * math.sin(phi)
+    x = BASE_XY + r * math.cos(q1)
+    y = -r * math.sin(q1)
+    z = BASE_Z + h
+    pitch = phi + math.pi / 2
+    roll = q5
+    return x, y, z, pitch, roll
+
+
 def _in_limits(name, val):
     lo, hi = JOINT_LIMITS[name]
     return lo - 1e-6 <= val <= hi + 1e-6
@@ -202,15 +274,42 @@ def _quaternion_to_rpy(qx, qy, qz, qw):
 # ---------------------------------------------------------------------------
 
 class X3plus5DofPlanner(Node):
+    _JOINT_STATES_TOPIC = "/x3plus/joint_states"
+    _FJT_ACTION = "/joint_trajectory_controller/follow_joint_trajectory"
+    _CONTROLLER_JOINTS = JOINT_NAMES + ["grip_joint"]
+
+    _MAX_JOINT_VEL = 0.8   # rad/s — conservative limit for the real servos
+
     def __init__(self):
         super().__init__("x3plus_5dof_planner")
 
         self._action_cb_group = MutuallyExclusiveCallbackGroup()
+        self._fjt_cb_group = MutuallyExclusiveCallbackGroup()
         self._service_cb_group = ReentrantCallbackGroup()
 
         self._move_group_client = ActionClient(
             self, MoveGroup, "move_action",
             callback_group=self._action_cb_group,
+        )
+        self._fjt_client = ActionClient(
+            self, FollowJointTrajectory, self._FJT_ACTION,
+            callback_group=self._fjt_cb_group,
+        )
+
+        # Joint state tracking for FK / straight-line planning.
+        # Subscribe to both the bridge topic and the standard topic so the
+        # straight-line planner works in all modes (real robot, sim, topic-based).
+        self._current_arm_positions = None   # 5 arm joints (from hardware)
+        self._current_grip_position = 0.0
+        self._virtual_arm_positions = None  # overrides hardware state in dry-run
+        self._virtual_grip_position = None
+        self.create_subscription(
+            JointState, self._JOINT_STATES_TOPIC,
+            self._joint_state_cb, 1,
+        )
+        self.create_subscription(
+            JointState, "/joint_states",
+            self._joint_state_cb, 1,
         )
 
         self.create_service(
@@ -229,6 +328,10 @@ class X3plus5DofPlanner(Node):
             Trigger, "~/go_home", self._go_home_cb,
             callback_group=self._service_cb_group,
         )
+        self.create_service(
+            Trigger, "~/plan_straight_line", self._plan_straight_line_cb,
+            callback_group=self._service_cb_group,
+        )
 
         # Declare parameters for goal specification
         self.declare_parameter("target_x", 0.2)
@@ -242,9 +345,15 @@ class X3plus5DofPlanner(Node):
         self.declare_parameter("target_qw", 1.0)
         self.declare_parameter("execute", True,
                                ParameterDescriptor(description="Execute after planning"))
+        self.declare_parameter("cartesian_speed", 0.05,
+                               ParameterDescriptor(description="Straight-line speed (m/s)"))
+        self.declare_parameter("cartesian_step", 0.01,
+                               ParameterDescriptor(description="Waypoint spacing (m)"))
 
-        self.get_logger().info("X3plus 5-DOF planner ready. Services: "
-                               "~/plan_position, ~/plan_position_orient, ~/plan_pose, ~/go_home")
+        self.get_logger().info(
+            "X3plus 5-DOF planner ready. Services: ~/plan_position, "
+            "~/plan_position_orient, ~/plan_pose, ~/go_home, ~/plan_straight_line"
+        )
 
     # ── Service callbacks ──
 
@@ -405,6 +514,217 @@ class X3plus5DofPlanner(Node):
         response.message = self._format_result(result)
         return response
 
+    def _joint_state_cb(self, msg):
+        name_to_pos = dict(zip(msg.name, msg.position))
+        positions = []
+        for name in JOINT_NAMES:
+            if name not in name_to_pos:
+                return
+            positions.append(float(name_to_pos[name]))
+        if any(math.isnan(p) or math.isinf(p) for p in positions):
+            return
+        self._current_arm_positions = positions
+        self._current_grip_position = float(name_to_pos.get("grip_joint", 0.0))
+
+    def _plan_straight_line_cb(self, request, response):
+        """Plan and execute a straight-line Cartesian path to the target.
+
+        Validates the full path upfront before execution:
+          1. Reject immediately if the target has no valid IK.
+          2. Interpolate pitch smoothly from current to target (no mid-path
+             discontinuities).
+          3. Validate every waypoint — any IK failure rejects the request.
+          4. Execute only after the entire trajectory is validated.
+        """
+        q = self._virtual_arm_positions or self._current_arm_positions
+        if q is None:
+            response.success = False
+            response.message = (
+                f"No joint state received on {self._JOINT_STATES_TOPIC} yet"
+            )
+            return response
+
+        target_x = self.get_parameter("target_x").value
+        target_y = self.get_parameter("target_y").value
+        target_z = self.get_parameter("target_z").value
+        execute = self.get_parameter("execute").value
+        speed = self.get_parameter("cartesian_speed").value
+        step = self.get_parameter("cartesian_step").value
+        cur_x, cur_y, cur_z, cur_pitch, cur_roll = forward_kinematics_5d(*q)
+
+        self.get_logger().info(
+            f"plan_straight_line: ({cur_x:.4f}, {cur_y:.4f}, {cur_z:.4f}) -> "
+            f"({target_x:.4f}, {target_y:.4f}, {target_z:.4f})"
+        )
+
+        # --- Phase 1: Validate target upfront ---
+        if not is_in_workspace(target_x, target_y, target_z):
+            response.success = False
+            response.message = (
+                f"Target ({target_x:.3f},{target_y:.3f},{target_z:.3f}) "
+                "is outside workspace"
+            )
+            return response
+
+        target_joints = analytical_ik_5d(
+            target_x, target_y, target_z, cur_pitch, cur_roll,
+        )
+        if target_joints is not None:
+            target_pitch = cur_pitch
+        else:
+            target_pitch = _best_pitch_for_position(target_x, target_y, target_z)
+            if target_pitch is None:
+                response.success = False
+                response.message = (
+                    f"Target ({target_x:.3f},{target_y:.3f},{target_z:.3f}) "
+                    "has no valid IK for any orientation"
+                )
+                return response
+            target_joints = analytical_ik_5d(
+                target_x, target_y, target_z, target_pitch, cur_roll,
+            )
+            if target_joints is None:
+                response.success = False
+                response.message = (
+                    f"Target ({target_x:.3f},{target_y:.3f},{target_z:.3f}) "
+                    f"IK failed at best pitch={math.degrees(target_pitch):.1f}°"
+                )
+                return response
+
+        dx = target_x - cur_x
+        dy = target_y - cur_y
+        dz = target_z - cur_z
+        distance = math.sqrt(dx * dx + dy * dy + dz * dz)
+
+        if distance < 1e-4:
+            response.success = True
+            response.message = "Already at target (distance < 0.1mm)"
+            return response
+
+        n_points = max(2, int(math.ceil(distance / step)) + 1)
+        total_time = distance / speed
+
+        # --- Phase 2: Generate and validate full path ---
+        # Pitch is interpolated smoothly from cur_pitch to target_pitch so the
+        # gripper orientation transitions gradually (no mid-path jumps).
+        grip = self._current_grip_position
+        waypoint_positions = [list(q) + [grip]]
+
+        n_flips_avoided = 0
+        for i in range(1, n_points):
+            t = i / (n_points - 1)
+            wx = cur_x + t * dx
+            wy = cur_y + t * dy
+            wz = cur_z + t * dz
+            wp_pitch = cur_pitch + t * (target_pitch - cur_pitch)
+
+            solutions = analytical_ik_5d_all(wx, wy, wz, wp_pitch, cur_roll)
+            if not solutions:
+                response.success = False
+                response.message = (
+                    f"Straight-line path infeasible: IK failed at waypoint "
+                    f"{i}/{n_points - 1} ({wx:.3f}, {wy:.3f}, {wz:.3f}), "
+                    f"pitch={math.degrees(wp_pitch):.1f}°"
+                )
+                return response
+            prev = waypoint_positions[-1][:5]
+            joints = min(
+                solutions,
+                key=lambda s: sum((a - b) ** 2 for a, b in zip(s, prev)),
+            )
+            if len(solutions) > 1 and solutions[0] != joints:
+                n_flips_avoided += 1
+            waypoint_positions.append(list(joints) + [grip])
+
+        if n_flips_avoided:
+            self.get_logger().info(
+                f"Continuity: avoided {n_flips_avoided} IK config flip(s) "
+                f"along {n_points} waypoints"
+            )
+
+        # Per-segment velocity limiting: stretch only the segments where a
+        # joint would exceed _MAX_JOINT_VEL, leaving the rest at nominal speed.
+        # This prevents a single waypoint with a large pitch change from
+        # slowing the entire trajectory by 10-20x.
+        dt_nominal = total_time / (n_points - 1)
+        segment_dts = []
+        for i in range(1, n_points):
+            max_seg_vel = 0.0
+            for j in range(5):
+                v = abs(waypoint_positions[i][j] - waypoint_positions[i - 1][j]) / dt_nominal
+                if v > max_seg_vel:
+                    max_seg_vel = v
+            if max_seg_vel > self._MAX_JOINT_VEL:
+                segment_dts.append(dt_nominal * max_seg_vel / self._MAX_JOINT_VEL)
+            else:
+                segment_dts.append(dt_nominal)
+
+        total_time = sum(segment_dts)
+        n_stretched = sum(1 for sdt in segment_dts if sdt > dt_nominal * 1.01)
+        if n_stretched:
+            self.get_logger().info(
+                f"Stretched {n_stretched}/{len(segment_dts)} segments "
+                f"for joint velocity limit ({self._MAX_JOINT_VEL} rad/s), "
+                f"total_time={total_time:.2f}s"
+            )
+
+        timestamps = [0.0]
+        for sdt in segment_dts:
+            timestamps.append(timestamps[-1] + sdt)
+
+        n_joints = len(self._CONTROLLER_JOINTS)
+        zero_vel = [0.0] * n_joints
+
+        points = []
+        for i in range(n_points):
+            pt = JointTrajectoryPoint()
+            pt.positions = waypoint_positions[i]
+
+            t_sec = timestamps[i]
+            pt.time_from_start = Duration(
+                sec=int(t_sec), nanosec=int((t_sec - int(t_sec)) * 1e9),
+            )
+
+            if i == 0 or i == n_points - 1:
+                pt.velocities = zero_vel
+            else:
+                dt_span = timestamps[i + 1] - timestamps[i - 1]
+                pt.velocities = [
+                    (waypoint_positions[i + 1][j] - waypoint_positions[i - 1][j])
+                    / dt_span
+                    for j in range(n_joints)
+                ]
+            points.append(pt)
+
+        self.get_logger().info(
+            f"Straight-line path: {n_points} waypoints, "
+            f"{distance * 100:.1f} cm, {total_time:.2f}s"
+        )
+
+        if not execute:
+            # Advance virtual position so the next dry-run call starts from
+            # the end of this path (separate from hardware joint_state_cb).
+            final = waypoint_positions[-1]
+            self._virtual_arm_positions = list(final[:5])
+            self._virtual_grip_position = final[5]
+            response.success = True
+            response.message = (
+                f"Plan OK: {n_points} waypoints, "
+                f"{distance * 100:.1f} cm, {total_time:.2f}s"
+            )
+            return response
+
+        self._virtual_arm_positions = None
+        self._virtual_grip_position = None
+        result = self._execute_fjt(points, total_time)
+        if result == PlanResult.SUCCESS:
+            final = waypoint_positions[-1]
+            self._virtual_arm_positions = list(final[:5])
+            self._virtual_grip_position = final[5]
+        response.success = (result == PlanResult.SUCCESS)
+        response.message = self._format_result(result)
+        return response
+
     # ── Helpers ──
 
     @staticmethod
@@ -416,6 +736,51 @@ class X3plus5DofPlanner(Node):
                 return False
             _time.sleep(0.01)
         return True
+
+    # ── FollowJointTrajectory execution ──
+
+    def _execute_fjt(self, points, total_time):
+        """Send a pre-computed trajectory to the controller."""
+        if not self._fjt_client.wait_for_server(timeout_sec=5.0):
+            self.get_logger().error(
+                f"FollowJointTrajectory server {self._FJT_ACTION} not available"
+            )
+            return PlanResult.PLANNING_FAILED
+
+        goal = FollowJointTrajectory.Goal()
+        goal.trajectory = JointTrajectory()
+        goal.trajectory.joint_names = list(self._CONTROLLER_JOINTS)
+        goal.trajectory.points = points
+
+        future = self._fjt_client.send_goal_async(goal)
+        if not self._wait_for_future(future, timeout_sec=10.0):
+            self.get_logger().error("Timed out waiting for trajectory goal acceptance")
+            return PlanResult.PLANNING_FAILED
+
+        goal_handle = future.result()
+        if goal_handle is None or not goal_handle.accepted:
+            self.get_logger().error("Trajectory goal rejected by controller")
+            return PlanResult.PLANNING_FAILED
+
+        result_future = goal_handle.get_result_async()
+        timeout = total_time + 10.0
+        if not self._wait_for_future(result_future, timeout_sec=timeout):
+            self.get_logger().error("Timed out waiting for trajectory execution")
+            return PlanResult.PLANNING_FAILED
+
+        result = result_future.result()
+        if result is None:
+            self.get_logger().error("No result from FollowJointTrajectory")
+            return PlanResult.PLANNING_FAILED
+
+        error_code = result.result.error_code
+        if error_code == 0:  # SUCCESSFUL
+            self.get_logger().info("Straight-line trajectory executed successfully")
+            return PlanResult.SUCCESS
+
+        self.get_logger().error(f"FollowJointTrajectory error code: {error_code}")
+        self._last_moveit_error = error_code
+        return PlanResult.PLANNING_FAILED
 
     # ── MoveIt interface ──
 
@@ -430,8 +795,8 @@ class X3plus5DofPlanner(Node):
         req = MotionPlanRequest()
         req.group_name = PLANNING_GROUP
         req.planner_id = "RRTConnect"
-        req.num_planning_attempts = 5
-        req.allowed_planning_time = 5.0
+        req.num_planning_attempts = 10
+        req.allowed_planning_time = 2.0
         req.max_velocity_scaling_factor = 0.3
         req.max_acceleration_scaling_factor = 0.3
 
@@ -456,18 +821,6 @@ class X3plus5DofPlanner(Node):
             constraints.joint_constraints.append(jc)
 
         req.goal_constraints.append(constraints)
-
-        # Keep arm_joint5 near its goal value during the entire motion to
-        # prevent OMPL from rotating the wrist/gripper along the path.
-        path_constraints = Constraints()
-        jc5 = JointConstraint()
-        jc5.joint_name = "arm_joint5"
-        jc5.position = joint_values[4]
-        jc5.tolerance_above = 0.15
-        jc5.tolerance_below = 0.15
-        jc5.weight = 1.0
-        path_constraints.joint_constraints.append(jc5)
-        req.path_constraints = path_constraints
 
         goal_msg.request = req
 
@@ -497,6 +850,8 @@ class X3plus5DofPlanner(Node):
 
         error_code = result.result.error_code.val
         if error_code == 1:  # MoveItErrorCodes.SUCCESS
+            self._virtual_arm_positions = list(joint_values[:5])
+            self._virtual_grip_position = 0.0
             action = "executed" if execute else "planned"
             self.get_logger().info(f"Motion {action} successfully")
             return PlanResult.SUCCESS
