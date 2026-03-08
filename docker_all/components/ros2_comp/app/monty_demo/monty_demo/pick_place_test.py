@@ -225,6 +225,9 @@ def generate_candidates(n=100, seed=42, min_dist=0.015):
 
 
 def visualize_points(candidates, results=None, out_path="pick_place_test_results.png"):
+    if not candidates:
+        return
+
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt

@@ -47,7 +47,7 @@ from std_srvs.srv import Trigger
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 from rcl_interfaces.msg import ParameterDescriptor
 
-from monty_demo.opus_plan_and_imp.log_utils import make_file_logger
+from monty_demo.opus_plan_and_imp.log_utils import LOG_DIR, make_file_logger
 
 # ---------------------------------------------------------------------------
 # Kinematic constants (from URDF)
@@ -365,7 +365,7 @@ class X3plus5DofPlanner(Node):
                                    description="Safety lockout: when True, no trajectory "
                                                "is executed on the real robot"))
 
-        _log_path = "/tmp/x3plus_planner.log"
+        _log_path = f"{LOG_DIR}/x3plus_planner.log"
         self._flog = make_file_logger("x3plus_planner", _log_path)
         self._flog.info("=" * 60)
         self._flog.info("X3plus 5-DOF planner node starting")
@@ -615,7 +615,9 @@ class X3plus5DofPlanner(Node):
             f"go_home: current=[{cur_fmt}] target={list(INIT_ARM_POSITIONS)} execute={execute}"
         )
         home = list(INIT_ARM_POSITIONS)
-        result = self._plan_joint_target(home, execute)
+        result = self._plan_joint_target(
+            home, execute, vel_scale=0.15, accel_scale=0.15,
+        )
         response.success = (result == PlanResult.SUCCESS)
         response.message = self._format_result(result)
         self._flog.debug(f"go_home: result={result.name}")
@@ -655,7 +657,9 @@ class X3plus5DofPlanner(Node):
             f"go_home_on_start: executing go_home → {home} execute={execute}"
         )
         self.get_logger().info("go_home_on_start: executing")
-        result = self._plan_joint_target(home, execute=execute)
+        result = self._plan_joint_target(
+            home, execute=execute, vel_scale=0.15, accel_scale=0.15,
+        )
         if result == PlanResult.SUCCESS:
             self.get_logger().info("go_home_on_start: completed successfully")
             self._flog.info("go_home_on_start: completed successfully")
@@ -1084,7 +1088,8 @@ class X3plus5DofPlanner(Node):
 
     # ── MoveIt interface ──
 
-    def _plan_joint_target(self, joint_values, execute=True):
+    def _plan_joint_target(self, joint_values, execute=True,
+                           vel_scale=0.3, accel_scale=0.3):
         """Send a joint-space goal to move_group and optionally execute."""
         if self._is_dry_run and execute:
             self._flog.warning(
@@ -1115,8 +1120,8 @@ class X3plus5DofPlanner(Node):
         req.planner_id = "RRTConnect"
         req.num_planning_attempts = 10
         req.allowed_planning_time = 2.0
-        req.max_velocity_scaling_factor = 0.1
-        req.max_acceleration_scaling_factor = 0.1
+        req.max_velocity_scaling_factor = vel_scale
+        req.max_acceleration_scaling_factor = accel_scale
         self._flog.debug(
             f"_plan_joint_target: vel_scale={req.max_velocity_scaling_factor} "
             f"accel_scale={req.max_acceleration_scaling_factor} "

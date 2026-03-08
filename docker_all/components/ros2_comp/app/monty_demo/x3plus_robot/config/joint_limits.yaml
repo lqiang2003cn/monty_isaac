@@ -2,37 +2,42 @@
 # Position limits come from the URDF; velocity and acceleration are set here
 # for trajectory time-parameterization.
 #
-# The real x3plus hardware runs at 20 Hz with servo_run_time ~80 ms, so keep
-# velocities conservative to avoid commanding faster than the servos can track.
+# The x3plus bus servos (LX-16A class) can reach ~315 deg/s unloaded. These
+# limits are set to ~115 deg/s (2.0 rad/s) which is well within hardware
+# capability even under load, while vel_scale/accel_scale in the planner
+# further reduces effective speed per-motion (default 0.3 = 0.6 rad/s).
+#
+# The bridge control loop runs at 20 Hz with servo run_time = 100 ms (2x the
+# 50 ms command interval) for smooth overlapping interpolation.
 
 joint_limits:
   arm_joint1:
     has_velocity_limits: true
-    max_velocity: 1.0
+    max_velocity: 2.0
     has_acceleration_limits: true
-    max_acceleration: 0.75
+    max_acceleration: 2.0
   arm_joint2:
     has_velocity_limits: true
-    max_velocity: 1.0
+    max_velocity: 2.0
     has_acceleration_limits: true
-    max_acceleration: 0.75
+    max_acceleration: 2.0
   arm_joint3:
     has_velocity_limits: true
-    max_velocity: 1.0
+    max_velocity: 2.0
     has_acceleration_limits: true
-    max_acceleration: 0.75
+    max_acceleration: 2.0
   arm_joint4:
     has_velocity_limits: true
-    max_velocity: 1.0
+    max_velocity: 2.0
     has_acceleration_limits: true
-    max_acceleration: 0.75
+    max_acceleration: 2.0
   arm_joint5:
     has_velocity_limits: true
-    max_velocity: 1.0
+    max_velocity: 2.0
     has_acceleration_limits: true
-    max_acceleration: 0.75
+    max_acceleration: 2.0
   grip_joint:
     has_velocity_limits: true
-    max_velocity: 1.0
+    max_velocity: 2.0
     has_acceleration_limits: true
-    max_acceleration: 1.5
+    max_acceleration: 2.0

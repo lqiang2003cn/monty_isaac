@@ -47,9 +47,8 @@ detect_orin_serial() {
   local devs
   devs="$(run_ssh_cmd 'ls /dev/ttyUSB* 2>/dev/null || true')" || true
   if [[ -z "$devs" ]]; then
-    echo "[real_up] WARNING: No /dev/ttyUSB* found on $REMOTE_HOST. Defaulting to /dev/ttyUSB0." >&2
-    REMOTE_SERIAL="/dev/ttyUSB0"
-    return
+    echo "[real_up] ERROR: No /dev/ttyUSB* found on $REMOTE_HOST. Is the robot connected?" >&2
+    exit 1
   fi
   REMOTE_SERIAL="$(echo "$devs" | head -n1)"
   echo "[real_up] Detected serial device on Orin: $REMOTE_SERIAL"
@@ -83,25 +82,25 @@ run_remote_build() {
     echo "[real_up] Syncing docker_all to $REMOTE_HOST:$REMOTE_REPO/docker_all (full, for build) ..."
     rsync_opts_build=("${rsync_opts[@]}" --delete)
     if ! rsync "${rsync_opts_build[@]}" "$DOCKER_ALL/" "$REMOTE_HOST:$REMOTE_REPO/docker_all/"; then
-      echo "[real_up] WARNING: rsync to $REMOTE_HOST failed. Continuing with local compose; ZMQ may be unreachable." >&2
-      return 0
+      echo "[real_up] ERROR: rsync to $REMOTE_HOST failed. Cannot reach remote robot." >&2
+      exit 1
     fi
     echo "[real_up] Sync done."
     # Build on Orin (requires Docker Hub reachable on Orin)
     echo "[real_up] Building and starting remote_real_x3plus on $REMOTE_HOST (serial=$REMOTE_SERIAL) ..."
     remote_cmd="cd $REMOTE_REPO/docker_all && ORIN_SERIAL_DEVICE=$REMOTE_SERIAL docker compose -f components/remote_real_x3plus/docker-compose.remote.yml up -d --build --force-recreate"
     if ! run_ssh_cmd "$remote_cmd"; then
-      echo "[real_up] WARNING: Remote build/start on $REMOTE_HOST failed. Continuing with local compose; ZMQ may be unreachable." >&2
-    else
-      echo "[real_up] Remote build/start on $REMOTE_HOST completed."
+      echo "[real_up] ERROR: Remote build/start on $REMOTE_HOST failed." >&2
+      exit 1
     fi
+    echo "[real_up] Remote build/start on $REMOTE_HOST completed."
     return 0
   fi
 
   # 1) Ensure local registry is running (Orin will pull from REGISTRY_HOST:5000)
   if [[ -z "$REGISTRY_HOST" ]]; then
-    echo "[real_up] WARNING: REGISTRY_HOST not set (could not auto-detect). Set it to your machine's LAN IP and run: $SCRIPT_DIR/start_local_registry.sh" >&2
-    return 0
+    echo "[real_up] ERROR: REGISTRY_HOST not set (could not auto-detect). Set it to your machine's LAN IP and run: $SCRIPT_DIR/start_local_registry.sh" >&2
+    exit 1
   fi
   if ! docker inspect monty_registry &>/dev/null; then
     echo "[real_up] Starting local registry (monty_registry) ..."
@@ -114,8 +113,8 @@ run_remote_build() {
   # 2) Build image for linux/arm64, load into host, then push (host daemon has insecure-registries; buildx --push uses builder's client which doesn't)
   echo "[real_up] Building remote_real_x3plus for linux/arm64 ..."
   if ! docker buildx version &>/dev/null; then
-    echo "[real_up] WARNING: docker buildx not found. Install Docker Buildx or set REMOTE_BUILD_ON_ORIN=1 to build on Orin." >&2
-    return 0
+    echo "[real_up] ERROR: docker buildx not found. Install Docker Buildx or set REMOTE_BUILD_ON_ORIN=1 to build on Orin." >&2
+    exit 1
   fi
   if ! docker buildx inspect monty_arm64 &>/dev/null; then
     echo "[real_up] Creating buildx builder monty_arm64 for linux/arm64 ..."
@@ -127,13 +126,13 @@ run_remote_build() {
     -f "$DOCKER_ALL/components/remote_real_x3plus/Dockerfile" \
     "$DOCKER_ALL" \
     --load; then
-    echo "[real_up] WARNING: Build failed. Ensure buildx builder monty_arm64 exists (driver docker-container)." >&2
-    return 0
+    echo "[real_up] ERROR: Build failed. Ensure buildx builder monty_arm64 exists (driver docker-container)." >&2
+    exit 1
   fi
   echo "[real_up] Pushing to $REGISTRY_IMAGE (host Docker; ensure insecure-registries in daemon.json) ..."
   if ! docker push "$REGISTRY_IMAGE"; then
-    echo "[real_up] WARNING: Push to $REGISTRY_IMAGE failed. Add $REGISTRY_HOST:$REGISTRY_PORT to insecure-registries in /etc/docker/daemon.json and restart Docker." >&2
-    return 0
+    echo "[real_up] ERROR: Push to $REGISTRY_IMAGE failed. Add $REGISTRY_HOST:$REGISTRY_PORT to insecure-registries in /etc/docker/daemon.json and restart Docker." >&2
+    exit 1
   fi
   echo "[real_up] Pushed to $REGISTRY_IMAGE"
 
@@ -141,21 +140,75 @@ run_remote_build() {
   echo "[real_up] Syncing remote compose file to $REMOTE_HOST:$REMOTE_REPO/docker_all ..."
   REMOTE_COMPOSE_DIR="components/remote_real_x3plus"
   if ! run_ssh_cmd "mkdir -p $REMOTE_REPO/docker_all/$REMOTE_COMPOSE_DIR"; then
-    echo "[real_up] WARNING: Could not create remote dir. Continuing with local compose; ZMQ may be unreachable." >&2
-    return 0
+    echo "[real_up] ERROR: Could not create remote dir on $REMOTE_HOST." >&2
+    exit 1
   fi
   if ! rsync "${rsync_opts[@]}" "$DOCKER_ALL/$REMOTE_COMPOSE_DIR/docker-compose.remote.yml" "$REMOTE_HOST:$REMOTE_REPO/docker_all/$REMOTE_COMPOSE_DIR/"; then
-    echo "[real_up] WARNING: rsync compose file to $REMOTE_HOST failed. Continuing with local compose; ZMQ may be unreachable." >&2
-    return 0
+    echo "[real_up] ERROR: rsync compose file to $REMOTE_HOST failed." >&2
+    exit 1
   fi
 
   # 4) On Orin: pull from registry and start container (REMOTE_ZMQ_IMAGE so compose uses registry image)
   remote_cmd="docker pull $REGISTRY_IMAGE && cd $REMOTE_REPO/docker_all && ORIN_SERIAL_DEVICE=$REMOTE_SERIAL REMOTE_ZMQ_IMAGE=$REGISTRY_IMAGE docker compose -f components/remote_real_x3plus/docker-compose.remote.yml up -d --force-recreate"
   if ! run_ssh_cmd "$remote_cmd"; then
-    echo "[real_up] WARNING: Remote pull/start on $REMOTE_HOST failed. Ensure Orin has $REGISTRY_HOST:$REGISTRY_PORT in insecure-registries (see docker_all/REMOTE_SETUP.md)." >&2
-  else
-    echo "[real_up] Remote remote_real_x3plus on $REMOTE_HOST started (pulled from $REGISTRY_IMAGE)."
+    echo "[real_up] ERROR: Remote pull/start on $REMOTE_HOST failed. Ensure Orin has $REGISTRY_HOST:$REGISTRY_PORT in insecure-registries (see docker_all/REMOTE_SETUP.md)." >&2
+    exit 1
   fi
+  echo "[real_up] Remote remote_real_x3plus on $REMOTE_HOST started (pulled from $REGISTRY_IMAGE)."
+}
+
+fix_log_dir_ownership() {
+  local dir="$1"
+  [[ -d "$dir" ]] || return 0
+  # Docker containers create files as root; reclaim so the host user can manage them
+  if [[ "$(stat -c '%u' "$dir" 2>/dev/null)" != "$(id -u)" ]]; then
+    if sudo -n chown -R "$(id -u):$(id -g)" "$dir" 2>/dev/null; then
+      echo "[real_up] Reclaimed ownership of $dir"
+    else
+      echo "[real_up] WARNING: $dir is owned by root. Run: sudo chown -R $(id -un):$(id -gn) $dir" >&2
+      return 1
+    fi
+  fi
+}
+
+clean_old_logs() {
+  local logs_dir="$DOCKER_ALL/logs"
+  mkdir -p "$logs_dir"
+  fix_log_dir_ownership "$logs_dir" || true
+
+  # Migrate loose log files left by pre-per-run layout into a _legacy directory
+  local has_loose=false
+  for f in "$logs_dir"/*.log "$logs_dir"/*.log.[0-9]*; do
+    [[ -f "$f" ]] && has_loose=true && break
+  done
+  if $has_loose; then
+    local legacy="$logs_dir/_legacy"
+    if mkdir -p "$legacy" 2>/dev/null; then
+      mv "$logs_dir"/*.log "$logs_dir"/*.log.[0-9]* "$legacy/" 2>/dev/null || true
+      echo "[real_up] Moved loose log files into $legacy"
+    else
+      echo "[real_up] WARNING: Could not migrate loose logs (permission denied). Continuing anyway." >&2
+    fi
+  fi
+
+  # Collect run directories sorted newest-first (timestamp names sort lexicographically)
+  local runs=()
+  while IFS= read -r d; do
+    [[ -d "$d" ]] && runs+=("$d")
+  done < <(find "$logs_dir" -mindepth 1 -maxdepth 1 -type d | sort -r)
+
+  # Keep only the 5 most recent run directories (rotation already caps each run at ~40 MB)
+  if (( ${#runs[@]} > 5 )); then
+    for ((i=5; i<${#runs[@]}; i++)); do
+      echo "[real_up] Pruning old log run: $(basename "${runs[$i]}")"
+      rm -rf "${runs[$i]}"
+    done
+    runs=("${runs[@]:0:5}")
+  fi
+
+  local remaining_kb
+  remaining_kb=$(du -sk "$logs_dir" 2>/dev/null | awk '{print $1}')
+  echo "[real_up] Log history: ${#runs[@]} run(s), $(( remaining_kb / 1024 )) MB total"
 }
 
 run_remote_build
@@ -163,12 +216,17 @@ cd "$DOCKER_ALL"
 
 export ROBOT_MODE=zmq
 export USE_MOVEIT=true
-export DEBUG_LOGS="${DEBUG_LOGS:-true}"
+export DEBUG_LOGS="${DEBUG_LOGS:-false}"
+
+# Per-run log directory — each run gets its own timestamped subdir under logs/
+export RUN_ID="$(date +%Y%m%d_%H%M%S)"
+clean_old_logs
+mkdir -p "$DOCKER_ALL/logs/$RUN_ID"
 
 # If no args (or only empty arg), default to "up --build" so logs stream to terminal
 if [[ $# -eq 0 ]] || { [[ $# -eq 1 ]] && [[ -z "${1:-}" ]]; }; then
   echo "[real_up] No arguments: starting local stack (docker compose up --build). Logs will stream below."
-  echo "[real_up] ROBOT_MODE=$ROBOT_MODE  USE_MOVEIT=$USE_MOVEIT  DEBUG_LOGS=$DEBUG_LOGS"
+  echo "[real_up] ROBOT_MODE=$ROBOT_MODE  USE_MOVEIT=$USE_MOVEIT  DEBUG_LOGS=$DEBUG_LOGS  RUN_ID=$RUN_ID"
   set -- up --build
 fi
 echo "[real_up] go_home will execute automatically once the planner and MoveIt are ready."

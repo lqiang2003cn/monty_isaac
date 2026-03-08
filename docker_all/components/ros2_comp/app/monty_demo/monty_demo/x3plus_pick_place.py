@@ -33,7 +33,7 @@ from std_srvs.srv import Trigger
 # Kinematic helpers (imported from planner module, no ROS needed)
 # ---------------------------------------------------------------------------
 
-from monty_demo.opus_plan_and_imp.log_utils import make_file_logger
+from monty_demo.opus_plan_and_imp.log_utils import LOG_DIR, make_file_logger
 from monty_demo.x3plus_5dof_planner import (
     analytical_ik_5d,
     is_in_workspace,
@@ -234,7 +234,7 @@ class X3plusPickPlace(Node):
                                    description="Safety lockout: when True, forces "
                                                "execute=False on all planner calls"))
 
-        _log_path = "/tmp/x3plus_pick_place.log"
+        _log_path = f"{LOG_DIR}/x3plus_pick_place.log"
         self._flog = make_file_logger("x3plus_pick_place", _log_path)
         self._flog.info("=" * 60)
         self._flog.info("X3plus pick-place node starting")

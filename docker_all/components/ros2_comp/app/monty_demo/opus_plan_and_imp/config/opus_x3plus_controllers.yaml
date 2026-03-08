@@ -28,6 +28,8 @@ joint_trajectory_controller:
       - position
     state_interfaces:
       - position
+    open_loop_control: true
+    interpolation_method: "splines"
     state_publish_rate: 50.0
     action_monitor_rate: 50.0
     allow_partial_joints_goal: true

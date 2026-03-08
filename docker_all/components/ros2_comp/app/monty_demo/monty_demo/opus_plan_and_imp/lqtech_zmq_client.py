@@ -7,6 +7,10 @@ Usage:
   client = LqtechZMQClient(host="192.168.1.10", port=5555)
   angles = client.get_joint_position_array()
   client.set_joint_position_single("arm_joint1", 92)
+
+  # Optional diagnostics (only available with ArmSerial-based service)
+  voltage = client.get_battery_voltage()
+  status = client.get_status()
 """
 
 import json
@@ -18,6 +22,9 @@ from monty_demo.opus_plan_and_imp.zmq_protocol import (
     GET_JOINT_POSITION_ARRAY,
     SET_JOINT_POSITION_ARRAY,
     SET_JOINT_POSITION_SINGLE,
+    GET_BATTERY_VOLTAGE,
+    SET_AUTO_REPORT,
+    GET_STATUS,
 )
 
 DEFAULT_HOST = "192.168.31.142"
@@ -40,6 +47,8 @@ class LqtechZMQClient:
             raise RuntimeError(resp["error"])
         return resp
 
+    # ── Core: arm joint control ──────────────────────────────────────────
+
     def get_joint_position_array(self):
         resp = self._request({"method": GET_JOINT_POSITION_ARRAY})
         return resp["joint_array"]
@@ -57,6 +66,24 @@ class LqtechZMQClient:
             "joint_value": int(joint_value),
         })
         return resp.get("result", "OK")
+
+    # ── Optional: diagnostics & configuration ────────────────────────────
+
+    def get_battery_voltage(self):
+        """Return battery voltage in volts."""
+        resp = self._request({"method": GET_BATTERY_VOLTAGE})
+        return resp["voltage"]
+
+    def set_auto_report(self, enable):
+        """Enable/disable MCU auto-report on the Orin side."""
+        resp = self._request({"method": SET_AUTO_REPORT, "enable": bool(enable)})
+        return resp.get("auto_report", enable)
+
+    def get_status(self):
+        """Return dict with voltage, firmware version, and auto_report state."""
+        return self._request({"method": GET_STATUS})
+
+    # ── lifecycle ────────────────────────────────────────────────────────
 
     def close(self):
         self._socket.close()

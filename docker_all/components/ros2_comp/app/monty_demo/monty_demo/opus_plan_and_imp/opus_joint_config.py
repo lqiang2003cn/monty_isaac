@@ -48,7 +48,8 @@ MIMIC_MAP = {
 # Per-joint: servo_id (1-6), offset_deg, scale (rad->deg multiplier), direction, min_deg, max_deg
 # arm_joint1-4: URDF [-pi/2, pi/2] rad -> servo [0, 180] deg => deg = rad * (180/pi) + 90
 # arm_joint5:   URDF [-pi/2, pi]   rad -> servo [0, 270] deg => same formula, servo allows up to 270
-# grip_joint:   URDF [-1.54, 0]    rad -> servo [30, 180] deg => deg = (rad + 1.54) / 1.54 * 150 + 30
+# grip_joint:   URDF [-1.54, 0]    rad -> servo [180, 30] deg => deg = 180 - (rad + 1.54) / 1.54 * 150
+#               (inverted: URDF 0 = open → servo 30°, URDF -1.54 = closed → servo 180°)
 SERVO_MAP = {
     "arm_joint1": {
         "servo_id": 1,
@@ -100,10 +101,11 @@ SERVO_MAP = {
     },
 }
 
-# Grip: deg = (rad + 1.54) * (150/1.54) + 30  =>  rad = (deg - 30) / (150/1.54) - 1.54
+# Grip (inverted servo direction):
+#   deg = 180 - (rad + 1.54) * (150/1.54)   =>   rad = (180 - deg) / (150/1.54) - 1.54
 GRIP_RAD_TO_DEG_SCALE = 150.0 / 1.54
 GRIP_RAD_OFFSET = 1.54
-GRIP_DEG_OFFSET = 30.0
+GRIP_SERVO_MAX = 180.0
 
 
 def rad_to_deg(joint_name: str, rad: float) -> float:
@@ -112,7 +114,7 @@ def rad_to_deg(joint_name: str, rad: float) -> float:
         return 0.0
     m = SERVO_MAP[joint_name]
     if joint_name == "grip_joint":
-        deg = (rad + GRIP_RAD_OFFSET) * GRIP_RAD_TO_DEG_SCALE + GRIP_DEG_OFFSET
+        deg = GRIP_SERVO_MAX - (rad + GRIP_RAD_OFFSET) * GRIP_RAD_TO_DEG_SCALE
     else:
         deg = m["direction"] * (rad * m["scale"]) + m["offset_deg"]
     return max(m["min_deg"], min(m["max_deg"], deg))
@@ -124,7 +126,7 @@ def deg_to_rad(joint_name: str, deg: float) -> float:
         return 0.0
     m = SERVO_MAP[joint_name]
     if joint_name == "grip_joint":
-        rad = (deg - GRIP_DEG_OFFSET) / GRIP_RAD_TO_DEG_SCALE - GRIP_RAD_OFFSET
+        rad = (GRIP_SERVO_MAX - deg) / GRIP_RAD_TO_DEG_SCALE - GRIP_RAD_OFFSET
     else:
         rad = (deg - m["offset_deg"]) / m["scale"]
     return rad
