@@ -102,10 +102,33 @@ GRIPPER_MIMIC = [
 JOINT_STATES_TOPIC = "/x3plus/joint_states"
 JOINT_COMMANDS_TOPIC = "/x3plus/joint_commands"
 
-# Default "open" gripper pose (from history: GRIP_TARGET = -1.54/2; must hold every frame like old demo)
-DEFAULT_GRIP_POS = -0.77  # grip_joint open position
-# Default arm pose when no command (old demo set [0,0,0,0,0, GRIP_TARGET] every step)
-DEFAULT_ARM_GRIP_POSITIONS = [0.0, 0.0, 0.0, 0.0, 0.0, DEFAULT_GRIP_POS]
+# ---------------------------------------------------------------------------
+# Init positions — loaded from shared YAML (single source of truth)
+# ---------------------------------------------------------------------------
+_INIT_YAML = Path(_os.environ.get(
+    "X3PLUS_INIT_POSITIONS_YAML", "/shared/x3plus_config/init_positions.yaml"))
+
+_FALLBACK_INIT = {
+    "arm_joint1": 0.0, "arm_joint2": -1.0, "arm_joint3": -0.8,
+    "arm_joint4": -1.3416, "arm_joint5": 0.0, "grip_joint": -0.77,
+}
+
+def _load_init_positions() -> dict[str, float]:
+    try:
+        import yaml
+        with open(_INIT_YAML) as f:
+            data = yaml.safe_load(f)
+        if isinstance(data, dict):
+            return {k: float(v) for k, v in data.items()
+                    if k in ARM_GRIP_JOINTS}
+    except Exception:
+        pass
+    return dict(_FALLBACK_INIT)
+
+_INIT_POS = _load_init_positions()
+DEFAULT_GRIP_POS = _INIT_POS.get("grip_joint", -0.77)
+DEFAULT_ARM_GRIP_POSITIONS = [_INIT_POS.get(j, 0.0) for j in ARM_GRIP_JOINTS]
+print(f"Init positions (from {_INIT_YAML}): {DEFAULT_ARM_GRIP_POSITIONS}")
 
 
 # Single source: docker_all/shared/x3plus_isaac (mounted at /shared in Docker)
@@ -188,11 +211,10 @@ def main() -> None:
         art = SingleArticulation(prim_path)
         art.initialize()
         if art.num_dof and art.num_dof > 0:
-            # Default pose: arm at 0, gripper "open" (grip=-0.77, mimics follow) so it looks correct in Isaac
             default_positions = {}
             for name in ROS2_CONTROL_JOINT_NAMES:
-                if name == "grip_joint":
-                    default_positions[name] = DEFAULT_GRIP_POS
+                if name in _INIT_POS:
+                    default_positions[name] = _INIT_POS[name]
                 elif name in (m[0] for m in GRIPPER_MIMIC):
                     mult = next(m for m in GRIPPER_MIMIC if m[0] == name)[1]
                     default_positions[name] = mult * DEFAULT_GRIP_POS

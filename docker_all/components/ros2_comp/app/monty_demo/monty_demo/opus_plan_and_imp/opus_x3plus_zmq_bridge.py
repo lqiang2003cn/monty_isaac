@@ -27,6 +27,7 @@ from monty_demo.opus_plan_and_imp.opus_joint_config import (
     deg_to_rad,
 )
 from monty_demo.opus_plan_and_imp.lqtech_zmq_client import LqtechZMQClient
+from monty_demo.opus_plan_and_imp.log_utils import make_file_logger
 from monty_demo.opus_plan_and_imp.zmq_protocol import GET_JOINT_POSITION_ARRAY
 
 JOINT_STATES_TOPIC = "/x3plus/joint_states"
@@ -86,6 +87,10 @@ def ensure_zmq_connection(host: str, port: int, log_fn) -> None:
     sys.exit(1)
 
 
+WATCHDOG_FAIL_THRESHOLD = 5
+WATCHDOG_LOCKOUT_SEC = 10.0
+
+
 class OpusX3PlusZMQBridge(Node):
     def __init__(self) -> None:
         super().__init__("opus_x3plus_zmq_bridge")
@@ -96,7 +101,11 @@ class OpusX3PlusZMQBridge(Node):
         host = self.get_parameter("zmq_host").get_parameter_value().string_value
         port = self.get_parameter("zmq_port").get_parameter_value().integer_value
 
-        self.get_logger().info("ZMQ client connecting to %s:%d" % (host, port))
+        self._flog = make_file_logger("zmq_bridge", "/tmp/x3plus_zmq_bridge.log")
+        self._flog.info("=" * 60)
+        self._flog.info("ZMQ bridge starting, host=%s:%d" % (host, port))
+
+        self.get_logger().info("ZMQ bridge connecting to %s:%d" % (host, port))
         self._zmq_client = LqtechZMQClient(host=host, port=port)
 
         state_hz = self.get_parameter("state_publish_hz").get_parameter_value().double_value
@@ -113,6 +122,13 @@ class OpusX3PlusZMQBridge(Node):
             QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE, history=HistoryPolicy.KEEP_LAST),
         )
         self._state_timer = self.create_timer(1.0 / state_hz, self._publish_joint_state)
+        self._cmd_count = 0
+        self._state_log_count = 0
+
+        self._consecutive_cmd_fails = 0
+        self._consecutive_state_fails = 0
+        self._cmd_lockout_until = 0.0
+
         self.get_logger().info(
             "ZMQ bridge: sub %s, pub %s, host=%s:%d" % (JOINT_COMMANDS_TOPIC, JOINT_STATES_TOPIC, host, port)
         )
@@ -120,6 +136,11 @@ class OpusX3PlusZMQBridge(Node):
     def _joint_commands_cb(self, msg: JointState) -> None:
         if not msg.name or len(msg.position) < len(msg.name):
             return
+
+        now = time.time()
+        if now < self._cmd_lockout_until:
+            return
+
         name_to_pos = dict(zip(msg.name, msg.position))
         angle_s = []
         for joint_name in SERVO_ORDER:
@@ -136,26 +157,62 @@ class OpusX3PlusZMQBridge(Node):
             return
         try:
             self._zmq_client.set_joint_position_array(angle_s)
-            if not getattr(self, "_cmd_logged", False):
-                self.get_logger().info("Forwarding commands to hardware: %s" % [round(a, 1) for a in angle_s])
-                self._cmd_logged = True
+            self._consecutive_cmd_fails = 0
+            self._cmd_count += 1
+            if self._cmd_count == 1:
+                self.get_logger().info("First command forwarded to hardware")
+            rad_fmt = ", ".join(
+                "%s=%.4f" % (n, name_to_pos[n]) for n in SERVO_ORDER if n in name_to_pos
+            )
+            deg_fmt = ", ".join("%.1f°" % d for d in angle_s)
+            self._flog.debug(
+                "CMD[%d]: rad=[%s] deg=[%s]" % (self._cmd_count, rad_fmt, deg_fmt)
+            )
         except Exception as e:
-            self.get_logger().error("ZMQ set_joint_position_array failed: %s" % e)
+            self._consecutive_cmd_fails += 1
+            self._flog.error(
+                "ZMQ set_joint_position_array failed (%d consecutive): %s"
+                % (self._consecutive_cmd_fails, e)
+            )
+            if self._consecutive_cmd_fails >= WATCHDOG_FAIL_THRESHOLD:
+                self._cmd_lockout_until = now + WATCHDOG_LOCKOUT_SEC
+                msg = (
+                    "WATCHDOG: %d consecutive command failures — "
+                    "refusing new commands for %.0fs. "
+                    "Check ZMQ service / Orin connectivity."
+                    % (self._consecutive_cmd_fails, WATCHDOG_LOCKOUT_SEC)
+                )
+                self.get_logger().error(msg)
+                self._flog.error(msg)
 
     def _publish_joint_state(self) -> None:
         try:
             degs = self._zmq_client.get_joint_position_array()
+            self._consecutive_state_fails = 0
         except Exception as e:
-            self.get_logger().error("ZMQ get_joint_position_array failed: %s" % e)
+            self._consecutive_state_fails += 1
+            self._flog.error(
+                "ZMQ get_joint_position_array failed (%d consecutive): %s"
+                % (self._consecutive_state_fails, e)
+            )
+            if self._consecutive_state_fails == WATCHDOG_FAIL_THRESHOLD:
+                msg = (
+                    "WATCHDOG: %d consecutive state-read failures — "
+                    "ZMQ service may be down. Joint states will be stale."
+                    % self._consecutive_state_fails
+                )
+                self.get_logger().error(msg)
+                self._flog.error(msg)
             return
         if len(degs) != 6:
             return
         n_bad = sum(1 for d in degs if d < 0)
         if n_bad > 0:
+            self._flog.error("Invalid servo positions: %s" % degs)
             if not getattr(self, "_hw_warn_logged", False):
                 self.get_logger().error(
-                    "Hardware returning invalid servo positions: %s "
-                    "(negative = no servo response). Check Orin serial/power." % degs
+                    "Hardware returning invalid servo positions "
+                    "(negative = no servo response). Check Orin serial/power."
                 )
                 self._hw_warn_logged = True
         else:
@@ -178,6 +235,15 @@ class OpusX3PlusZMQBridge(Node):
         msg.name = names_out
         msg.position = positions_out
         self._pub.publish(msg)
+
+        self._state_log_count += 1
+        if self._state_log_count == 1 or self._state_log_count % 40 == 0:
+            rad_fmt = ", ".join("%.4f" % p for p in positions_out[:6])
+            deg_fmt = ", ".join("%.1f°" % d for d in degs)
+            self._flog.debug(
+                "STATE[%d]: hw_deg=[%s] pub_rad=[%s]"
+                % (self._state_log_count, deg_fmt, rad_fmt)
+            )
 
     def destroy_node(self) -> None:
         try:

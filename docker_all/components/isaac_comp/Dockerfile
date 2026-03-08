@@ -34,6 +34,7 @@ LABEL maintainer="monty" \
 WORKDIR /isaac-sim
 
 COPY --from=urdf-gen /x3plus_isaac.urdf /shared/x3plus_isaac/urdf/x3plus_isaac.urdf
+COPY shared/x3plus_config/init_positions.yaml /shared/x3plus_config/init_positions.yaml
 COPY components/isaac_comp/app /app
 
 ENV PYTHONPATH=/app

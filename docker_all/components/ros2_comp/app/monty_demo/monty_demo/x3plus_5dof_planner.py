@@ -9,6 +9,7 @@ Exposes ROS 2 services that accept progressively richer goal types:
   3. ~/plan_pose            — full 6D Pose; rejects only if truly impossible
   4. ~/plan_straight_line   — straight-line Cartesian path from current pose
   5. ~/go_home              — return to all-zeros joint configuration
+  6. ~/set_gripper          — move grip_joint to target_grip (arm stays fixed)
 
 Services 1–3 validate the target against the workspace boundary, compute an
 analytical IK solution when applicable, and delegate collision-free path
@@ -45,6 +46,8 @@ from sensor_msgs.msg import JointState
 from std_srvs.srv import Trigger
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 from rcl_interfaces.msg import ParameterDescriptor
+
+from monty_demo.opus_plan_and_imp.log_utils import make_file_logger
 
 # ---------------------------------------------------------------------------
 # Kinematic constants (from URDF)
@@ -278,7 +281,7 @@ class X3plus5DofPlanner(Node):
     _FJT_ACTION = "/joint_trajectory_controller/follow_joint_trajectory"
     _CONTROLLER_JOINTS = JOINT_NAMES + ["grip_joint"]
 
-    _MAX_JOINT_VEL = 0.8   # rad/s — conservative limit for the real servos
+    _MAX_JOINT_VEL = 0.4   # rad/s — conservative limit for the real servos
 
     def __init__(self):
         super().__init__("x3plus_5dof_planner")
@@ -332,6 +335,10 @@ class X3plus5DofPlanner(Node):
             Trigger, "~/plan_straight_line", self._plan_straight_line_cb,
             callback_group=self._service_cb_group,
         )
+        self.create_service(
+            Trigger, "~/set_gripper", self._set_gripper_cb,
+            callback_group=self._service_cb_group,
+        )
 
         # Declare parameters for goal specification
         self.declare_parameter("target_x", 0.2)
@@ -345,15 +352,53 @@ class X3plus5DofPlanner(Node):
         self.declare_parameter("target_qw", 1.0)
         self.declare_parameter("execute", True,
                                ParameterDescriptor(description="Execute after planning"))
-        self.declare_parameter("cartesian_speed", 0.05,
+        self.declare_parameter("cartesian_speed", 0.03,
                                ParameterDescriptor(description="Straight-line speed (m/s)"))
         self.declare_parameter("cartesian_step", 0.01,
                                ParameterDescriptor(description="Waypoint spacing (m)"))
+        self.declare_parameter("go_home_on_start", True,
+                               ParameterDescriptor(description="Automatically go home when node starts"))
+        self.declare_parameter("target_grip", -0.77,
+                               ParameterDescriptor(description="Target grip_joint position for set_gripper"))
+        self.declare_parameter("dry_run", False,
+                               ParameterDescriptor(
+                                   description="Safety lockout: when True, no trajectory "
+                                               "is executed on the real robot"))
+
+        _log_path = "/tmp/x3plus_planner.log"
+        self._flog = make_file_logger("x3plus_planner", _log_path)
+        self._flog.info("=" * 60)
+        self._flog.info("X3plus 5-DOF planner node starting")
+        self.add_on_set_parameters_callback(self._on_params_changed)
 
         self.get_logger().info(
-            "X3plus 5-DOF planner ready. Services: ~/plan_position, "
-            "~/plan_position_orient, ~/plan_pose, ~/go_home, ~/plan_straight_line"
+            "Planner ready (log: %s). Services: ~/plan_position, "
+            "~/plan_position_orient, ~/plan_pose, ~/go_home, "
+            "~/plan_straight_line, ~/set_gripper" % _log_path
         )
+
+        self._js_log_count = 0
+
+        self._startup_go_home_done = False
+        if self.get_parameter("go_home_on_start").value:
+            self.get_logger().info("go_home_on_start enabled — will go home once MoveIt is ready")
+            self._startup_go_home_timer = self.create_timer(
+                3.0, self._startup_go_home_cb,
+                callback_group=self._service_cb_group,
+            )
+
+    # ── Parameter safety ──
+
+    @property
+    def _is_dry_run(self):
+        return self.get_parameter("dry_run").value
+
+    def _on_params_changed(self, params):
+        from rcl_interfaces.msg import SetParametersResult
+        for p in params:
+            if p.name in ("execute", "dry_run"):
+                self._flog.info(f"PARAM CHANGE: {p.name} = {p.value}")
+        return SetParametersResult(successful=True)
 
     # ── Service callbacks ──
 
@@ -366,32 +411,58 @@ class X3plus5DofPlanner(Node):
                 msg += f" (MoveIt error_code={code})"
         return msg
 
+    def _apply_dry_run(self, execute, caller):
+        """Defense-in-depth: override execute at the service-callback level."""
+        if self._is_dry_run and execute:
+            self._flog.warning(
+                f"{caller}: dry_run OVERRIDE execute=True → False"
+            )
+            self.get_logger().warn(
+                f"{caller}: dry_run active — forcing plan_only"
+            )
+            return False
+        return execute
+
     def _plan_position_cb(self, request, response):
         """Plan to (x, y, z) with orientation free."""
         x = self.get_parameter("target_x").value
         y = self.get_parameter("target_y").value
         z = self.get_parameter("target_z").value
-        execute = self.get_parameter("execute").value
+        execute = self._apply_dry_run(
+            self.get_parameter("execute").value, "plan_position"
+        )
 
-        self.get_logger().info(f"plan_position: ({x:.3f}, {y:.3f}, {z:.3f})")
+        self._flog.info(
+            f"plan_position: target=({x:.3f},{y:.3f},{z:.3f}) "
+            f"execute={execute} dry_run={self._is_dry_run}"
+        )
+        self.get_logger().info("plan_position requested")
 
         if not is_in_workspace(x, y, z):
+            self._flog.debug(f"plan_position: REJECTED — outside workspace")
             response.success = False
             response.message = f"Target ({x:.3f},{y:.3f},{z:.3f}) is outside workspace"
             return response
 
         pitch = _best_pitch_for_position(x, y, z)
         if pitch is None:
+            self._flog.debug(f"plan_position: REJECTED — no valid pitch")
             response.success = False
             response.message = "No valid IK found for any orientation at this position"
             return response
 
         joints = analytical_ik_5d(x, y, z, pitch, 0.0)
         if joints is None:
+            self._flog.debug(f"plan_position: REJECTED — IK failed at pitch={math.degrees(pitch):.1f}°")
             response.success = False
             response.message = "Analytical IK failed"
             return response
 
+        jfmt = ", ".join(f"{j:.4f}" for j in joints)
+        self._flog.debug(
+            f"plan_position: pitch={math.degrees(pitch):.1f}° "
+            f"joints=[{jfmt}] execute={execute}"
+        )
         result = self._plan_joint_target(list(joints), execute)
         response.success = (result == PlanResult.SUCCESS)
         response.message = self._format_result(result)
@@ -404,20 +475,29 @@ class X3plus5DofPlanner(Node):
         z = self.get_parameter("target_z").value
         pitch = self.get_parameter("target_pitch").value
         roll = self.get_parameter("target_roll").value
-        execute = self.get_parameter("execute").value
-
-        self.get_logger().info(
-            f"plan_position_orient: ({x:.3f},{y:.3f},{z:.3f}) "
-            f"pitch={math.degrees(pitch):.1f}° roll={math.degrees(roll):.1f}°"
+        execute = self._apply_dry_run(
+            self.get_parameter("execute").value, "plan_position_orient"
         )
 
+        self._flog.info(
+            f"plan_position_orient: target=({x:.3f},{y:.3f},{z:.3f}) "
+            f"pitch={math.degrees(pitch):.1f}° roll={math.degrees(roll):.1f}° "
+            f"execute={execute} dry_run={self._is_dry_run}"
+        )
+        self.get_logger().info("plan_position_orient requested")
+
         if not is_in_workspace(x, y, z):
+            self._flog.debug(f"plan_position_orient: REJECTED — outside workspace")
             response.success = False
             response.message = f"Target ({x:.3f},{y:.3f},{z:.3f}) is outside workspace"
             return response
 
         joints = analytical_ik_5d(x, y, z, pitch, roll)
         if joints is None:
+            self._flog.debug(
+                f"plan_position_orient: REJECTED — IK failed at "
+                f"pitch={math.degrees(pitch):.1f}° roll={math.degrees(roll):.1f}°"
+            )
             response.success = False
             response.message = (
                 f"IK failed: pitch={math.degrees(pitch):.1f}° not achievable at this position. "
@@ -425,6 +505,10 @@ class X3plus5DofPlanner(Node):
             )
             return response
 
+        jfmt = ", ".join(f"{j:.4f}" for j in joints)
+        self._flog.debug(
+            f"plan_position_orient: joints=[{jfmt}] execute={execute}"
+        )
         result = self._plan_joint_target(list(joints), execute)
         response.success = (result == PlanResult.SUCCESS)
         response.message = self._format_result(result)
@@ -439,12 +523,16 @@ class X3plus5DofPlanner(Node):
         qy = self.get_parameter("target_qy").value
         qz = self.get_parameter("target_qz").value
         qw = self.get_parameter("target_qw").value
-        execute = self.get_parameter("execute").value
-
-        self.get_logger().info(
-            f"plan_pose: ({x:.3f},{y:.3f},{z:.3f}) "
-            f"q=({qx:.3f},{qy:.3f},{qz:.3f},{qw:.3f})"
+        execute = self._apply_dry_run(
+            self.get_parameter("execute").value, "plan_pose"
         )
+
+        self._flog.info(
+            f"plan_pose: target=({x:.3f},{y:.3f},{z:.3f}) "
+            f"q=({qx:.3f},{qy:.3f},{qz:.3f},{qw:.3f}) "
+            f"execute={execute} dry_run={self._is_dry_run}"
+        )
+        self.get_logger().info("plan_pose requested")
 
         if not is_in_workspace(x, y, z):
             response.success = False
@@ -453,6 +541,12 @@ class X3plus5DofPlanner(Node):
 
         roll_d, pitch_d, yaw_d = _quaternion_to_rpy(qx, qy, qz, qw)
         arm_yaw = math.atan2(y, x)
+
+        self._flog.debug(
+            f"plan_pose: RPY=({math.degrees(roll_d):.1f}°, "
+            f"{math.degrees(pitch_d):.1f}°, {math.degrees(yaw_d):.1f}°) "
+            f"arm_yaw={math.degrees(arm_yaw):.1f}°"
+        )
 
         yaw_error = abs(yaw_d - arm_yaw)
         if yaw_error > math.pi:
@@ -496,8 +590,8 @@ class X3plus5DofPlanner(Node):
             response.message = "No valid IK solution found for any orientation at this position"
             return response
 
-        self.get_logger().info(
-            f"Using nearest achievable pitch (error: {math.degrees(best_err):.1f}°)"
+        self._flog.info(
+            f"plan_pose: using nearest achievable pitch (error: {math.degrees(best_err):.1f}°)"
         )
         result = self._plan_joint_target(list(best_joints), execute)
         response.success = (result == PlanResult.SUCCESS)
@@ -505,14 +599,69 @@ class X3plus5DofPlanner(Node):
         return response
 
     def _go_home_cb(self, request, response):
-        """Return to home (all joints zero) via joint-space planning."""
-        execute = self.get_parameter("execute").value
-        self.get_logger().info("go_home: returning to all-zeros joint configuration")
-        home = [0.0] * len(JOINT_NAMES)
+        """Return to init pose via joint-space planning."""
+        from monty_demo.opus_plan_and_imp.opus_joint_config import INIT_ARM_POSITIONS
+        execute = self._apply_dry_run(
+            self.get_parameter("execute").value, "go_home"
+        )
+        cur = self._virtual_arm_positions or self._current_arm_positions
+        cur_fmt = ", ".join(f"{j:.4f}" for j in cur) if cur else "None"
+        self._flog.info(
+            f"go_home: current=[{cur_fmt}] target={list(INIT_ARM_POSITIONS)} "
+            f"execute={execute} dry_run={self._is_dry_run}"
+        )
+        self.get_logger().info("go_home requested")
+        self._flog.debug(
+            f"go_home: current=[{cur_fmt}] target={list(INIT_ARM_POSITIONS)} execute={execute}"
+        )
+        home = list(INIT_ARM_POSITIONS)
         result = self._plan_joint_target(home, execute)
         response.success = (result == PlanResult.SUCCESS)
         response.message = self._format_result(result)
+        self._flog.debug(f"go_home: result={result.name}")
         return response
+
+    def _startup_go_home_cb(self):
+        """Retry timer: wait for joint states + MoveIt, then go home once."""
+        if self._startup_go_home_done:
+            self._startup_go_home_timer.cancel()
+            return
+
+        if self._current_arm_positions is None:
+            self._flog.debug("go_home_on_start: waiting for joint states…")
+            return
+
+        self._startup_go_home_done = True
+        self._startup_go_home_timer.cancel()
+
+        from monty_demo.opus_plan_and_imp.opus_joint_config import INIT_ARM_POSITIONS
+        home = list(INIT_ARM_POSITIONS)
+        cur_fmt = ", ".join(f"{j:.4f}" for j in self._current_arm_positions)
+        self._flog.debug(
+            f"go_home_on_start: current_joints=[{cur_fmt}] "
+            f"grip={self._current_grip_position:.4f}"
+        )
+        if self._is_dry_run:
+            self._flog.warning(
+                "go_home_on_start: SKIPPED — dry_run=True is active"
+            )
+            self.get_logger().warn(
+                "go_home_on_start: SKIPPED (dry_run=True safety lockout)"
+            )
+            return
+
+        execute = self.get_parameter("execute").value
+        self._flog.info(
+            f"go_home_on_start: executing go_home → {home} execute={execute}"
+        )
+        self.get_logger().info("go_home_on_start: executing")
+        result = self._plan_joint_target(home, execute=execute)
+        if result == PlanResult.SUCCESS:
+            self.get_logger().info("go_home_on_start: completed successfully")
+            self._flog.info("go_home_on_start: completed successfully")
+        else:
+            self.get_logger().warn(f"go_home_on_start: {self._format_result(result)}")
+            self._flog.warning(f"go_home_on_start: {self._format_result(result)}")
 
     def _joint_state_cb(self, msg):
         name_to_pos = dict(zip(msg.name, msg.position))
@@ -523,8 +672,16 @@ class X3plus5DofPlanner(Node):
             positions.append(float(name_to_pos[name]))
         if any(math.isnan(p) or math.isinf(p) for p in positions):
             return
+        first_receipt = self._current_arm_positions is None
         self._current_arm_positions = positions
         self._current_grip_position = float(name_to_pos.get("grip_joint", 0.0))
+        self._js_log_count += 1
+        if first_receipt or self._js_log_count % 40 == 0:
+            fmt = ", ".join(f"{p:.4f}" for p in positions)
+            self._flog.debug(
+                f"joint_state{'[FIRST]' if first_receipt else ''}: "
+                f"arm=[{fmt}] grip={self._current_grip_position:.4f}"
+            )
 
     def _plan_straight_line_cb(self, request, response):
         """Plan and execute a straight-line Cartesian path to the target.
@@ -547,14 +704,26 @@ class X3plus5DofPlanner(Node):
         target_x = self.get_parameter("target_x").value
         target_y = self.get_parameter("target_y").value
         target_z = self.get_parameter("target_z").value
-        execute = self.get_parameter("execute").value
+        execute = self._apply_dry_run(
+            self.get_parameter("execute").value, "plan_straight_line"
+        )
+        self._flog.info(
+            f"plan_straight_line: target=({target_x:.3f},{target_y:.3f},{target_z:.3f}) "
+            f"execute={execute} dry_run={self._is_dry_run}"
+        )
         speed = self.get_parameter("cartesian_speed").value
         step = self.get_parameter("cartesian_step").value
         cur_x, cur_y, cur_z, cur_pitch, cur_roll = forward_kinematics_5d(*q)
 
-        self.get_logger().info(
-            f"plan_straight_line: ({cur_x:.4f}, {cur_y:.4f}, {cur_z:.4f}) -> "
-            f"({target_x:.4f}, {target_y:.4f}, {target_z:.4f})"
+        self._flog.info(
+            f"plan_straight_line: ({cur_x:.4f},{cur_y:.4f},{cur_z:.4f}) -> "
+            f"({target_x:.4f},{target_y:.4f},{target_z:.4f})"
+        )
+        qfmt = ", ".join(f"{v:.4f}" for v in q)
+        self._flog.debug(
+            f"plan_straight_line: cur_joints=[{qfmt}] "
+            f"cur_pitch={math.degrees(cur_pitch):.1f}° cur_roll={math.degrees(cur_roll):.1f}° "
+            f"speed={speed:.3f}m/s step={step:.3f}m execute={execute}"
         )
 
         # --- Phase 1: Validate target upfront ---
@@ -591,6 +760,12 @@ class X3plus5DofPlanner(Node):
                 )
                 return response
 
+        tjfmt = ", ".join(f"{j:.4f}" for j in target_joints)
+        self._flog.debug(
+            f"plan_straight_line: target_pitch={math.degrees(target_pitch):.1f}° "
+            f"target_joints=[{tjfmt}]"
+        )
+
         dx = target_x - cur_x
         dy = target_y - cur_y
         dz = target_z - cur_z
@@ -603,6 +778,11 @@ class X3plus5DofPlanner(Node):
 
         n_points = max(2, int(math.ceil(distance / step)) + 1)
         total_time = distance / speed
+
+        self._flog.debug(
+            f"plan_straight_line: distance={distance*100:.2f}cm "
+            f"n_points={n_points} nominal_time={total_time:.2f}s"
+        )
 
         # --- Phase 2: Generate and validate full path ---
         # Pitch is interpolated smoothly from cur_pitch to target_pitch so the
@@ -637,7 +817,7 @@ class X3plus5DofPlanner(Node):
             waypoint_positions.append(list(joints) + [grip])
 
         if n_flips_avoided:
-            self.get_logger().info(
+            self._flog.info(
                 f"Continuity: avoided {n_flips_avoided} IK config flip(s) "
                 f"along {n_points} waypoints"
             )
@@ -662,7 +842,7 @@ class X3plus5DofPlanner(Node):
         total_time = sum(segment_dts)
         n_stretched = sum(1 for sdt in segment_dts if sdt > dt_nominal * 1.01)
         if n_stretched:
-            self.get_logger().info(
+            self._flog.info(
                 f"Stretched {n_stretched}/{len(segment_dts)} segments "
                 f"for joint velocity limit ({self._MAX_JOINT_VEL} rad/s), "
                 f"total_time={total_time:.2f}s"
@@ -701,6 +881,15 @@ class X3plus5DofPlanner(Node):
             f"{distance * 100:.1f} cm, {total_time:.2f}s"
         )
 
+        wp0 = ", ".join(f"{v:.4f}" for v in waypoint_positions[0])
+        wpN = ", ".join(f"{v:.4f}" for v in waypoint_positions[-1])
+        dt_min = min(segment_dts) if segment_dts else 0
+        dt_max = max(segment_dts) if segment_dts else 0
+        self._flog.debug(
+            f"plan_straight_line: first_wp=[{wp0}] last_wp=[{wpN}] "
+            f"dt_range=[{dt_min:.4f}s, {dt_max:.4f}s] total_time={total_time:.2f}s"
+        )
+
         if not execute:
             # Advance virtual position so the next dry-run call starts from
             # the end of this path (separate from hardware joint_state_cb).
@@ -725,6 +914,85 @@ class X3plus5DofPlanner(Node):
         response.message = self._format_result(result)
         return response
 
+    def _set_gripper_cb(self, request, response):
+        """Move grip_joint to target_grip while keeping all arm joints fixed."""
+        target_grip = self.get_parameter("target_grip").value
+        execute = self._apply_dry_run(
+            self.get_parameter("execute").value, "set_gripper"
+        )
+        self._flog.info(
+            f"set_gripper: target_grip={target_grip:.3f} "
+            f"execute={execute} dry_run={self._is_dry_run}"
+        )
+
+        q = self._virtual_arm_positions or self._current_arm_positions
+        if q is None:
+            response.success = False
+            response.message = (
+                f"No joint state received on {self._JOINT_STATES_TOPIC} yet"
+            )
+            return response
+
+        grip = (self._virtual_grip_position
+                if self._virtual_grip_position is not None
+                else self._current_grip_position)
+
+        self._flog.info(f"set_gripper: {grip:.3f} -> {target_grip:.3f}")
+        self.get_logger().info("set_gripper requested")
+
+        delta = abs(target_grip - grip)
+        self._flog.debug(
+            f"set_gripper: delta={delta:.4f} execute={execute}"
+        )
+        if delta < 1e-4:
+            response.success = True
+            response.message = "Gripper already at target"
+            return response
+
+        duration = max(0.5, delta / self._MAX_JOINT_VEL)
+        self._flog.debug(
+            f"set_gripper: duration={duration:.2f}s "
+            f"(delta={delta:.3f} / max_vel={self._MAX_JOINT_VEL})"
+        )
+
+        n_joints = len(self._CONTROLLER_JOINTS)
+        zero_vel = [0.0] * n_joints
+
+        start_pos = list(q) + [grip]
+        end_pos = list(q) + [target_grip]
+
+        pt0 = JointTrajectoryPoint()
+        pt0.positions = start_pos
+        pt0.velocities = zero_vel
+        pt0.time_from_start = Duration(sec=0, nanosec=0)
+
+        pt1 = JointTrajectoryPoint()
+        pt1.positions = end_pos
+        pt1.velocities = zero_vel
+        pt1.time_from_start = Duration(
+            sec=int(duration),
+            nanosec=int((duration - int(duration)) * 1e9),
+        )
+
+        if not execute:
+            self._virtual_grip_position = target_grip
+            response.success = True
+            response.message = (
+                f"Plan OK: grip {grip:.3f} -> {target_grip:.3f} "
+                f"({duration:.2f}s)"
+            )
+            return response
+
+        self._virtual_arm_positions = None
+        self._virtual_grip_position = None
+        result = self._execute_fjt([pt0, pt1], duration)
+        if result == PlanResult.SUCCESS:
+            self._virtual_arm_positions = list(q)
+            self._virtual_grip_position = target_grip
+        response.success = (result == PlanResult.SUCCESS)
+        response.message = self._format_result(result)
+        return response
+
     # ── Helpers ──
 
     @staticmethod
@@ -741,11 +1009,30 @@ class X3plus5DofPlanner(Node):
 
     def _execute_fjt(self, points, total_time):
         """Send a pre-computed trajectory to the controller."""
-        if not self._fjt_client.wait_for_server(timeout_sec=5.0):
-            self.get_logger().error(
-                f"FollowJointTrajectory server {self._FJT_ACTION} not available"
+        if self._is_dry_run:
+            self._flog.critical(
+                "SAFETY GATE: _execute_fjt called while dry_run=True! "
+                "Refusing to send trajectory to controller."
             )
+            self.get_logger().error(
+                "SAFETY: dry_run=True — trajectory NOT sent to controller"
+            )
+            return PlanResult.SUCCESS
+
+        if not self._fjt_client.wait_for_server(timeout_sec=5.0):
+            msg = f"FollowJointTrajectory server {self._FJT_ACTION} not available"
+            self.get_logger().error(msg)
+            self._flog.error(msg)
             return PlanResult.PLANNING_FAILED
+
+        p0_fmt = ", ".join(f"{v:.4f}" for v in points[0].positions)
+        pN_fmt = ", ".join(f"{v:.4f}" for v in points[-1].positions)
+        last_t = points[-1].time_from_start
+        dur_s = last_t.sec + last_t.nanosec * 1e-9
+        self._flog.debug(
+            f"_execute_fjt: {len(points)} points, duration={dur_s:.2f}s "
+            f"first=[{p0_fmt}] last=[{pN_fmt}]"
+        )
 
         goal = FollowJointTrajectory.Goal()
         goal.trajectory = JointTrajectory()
@@ -754,31 +1041,44 @@ class X3plus5DofPlanner(Node):
 
         future = self._fjt_client.send_goal_async(goal)
         if not self._wait_for_future(future, timeout_sec=10.0):
-            self.get_logger().error("Timed out waiting for trajectory goal acceptance")
+            msg = "Timed out waiting for trajectory goal acceptance"
+            self.get_logger().error(msg)
+            self._flog.error(f"FJT: {msg}")
             return PlanResult.PLANNING_FAILED
 
         goal_handle = future.result()
         if goal_handle is None or not goal_handle.accepted:
-            self.get_logger().error("Trajectory goal rejected by controller")
+            msg = "Trajectory goal rejected by controller"
+            self.get_logger().error(msg)
+            self._flog.error(f"FJT: {msg}")
             return PlanResult.PLANNING_FAILED
 
+        self._flog.info(
+            f"FJT: trajectory ACCEPTED — {len(points)} pts, "
+            f"{total_time:.2f}s — ARM IS MOVING"
+        )
         result_future = goal_handle.get_result_async()
         timeout = total_time + 10.0
         if not self._wait_for_future(result_future, timeout_sec=timeout):
-            self.get_logger().error("Timed out waiting for trajectory execution")
+            msg = "Timed out waiting for trajectory execution"
+            self.get_logger().error(msg)
+            self._flog.error(f"FJT: {msg}")
             return PlanResult.PLANNING_FAILED
 
         result = result_future.result()
         if result is None:
-            self.get_logger().error("No result from FollowJointTrajectory")
+            msg = "No result from FollowJointTrajectory"
+            self.get_logger().error(msg)
+            self._flog.error(f"FJT: {msg}")
             return PlanResult.PLANNING_FAILED
 
         error_code = result.result.error_code
         if error_code == 0:  # SUCCESSFUL
-            self.get_logger().info("Straight-line trajectory executed successfully")
+            self._flog.info("FJT: trajectory executed successfully")
             return PlanResult.SUCCESS
 
         self.get_logger().error(f"FollowJointTrajectory error code: {error_code}")
+        self._flog.error(f"FJT: error code {error_code}")
         self._last_moveit_error = error_code
         return PlanResult.PLANNING_FAILED
 
@@ -786,8 +1086,26 @@ class X3plus5DofPlanner(Node):
 
     def _plan_joint_target(self, joint_values, execute=True):
         """Send a joint-space goal to move_group and optionally execute."""
+        if self._is_dry_run and execute:
+            self._flog.warning(
+                "_plan_joint_target: dry_run OVERRIDE execute=True → False"
+            )
+            self.get_logger().warn(
+                "dry_run active — forcing plan_only for MoveIt goal"
+            )
+            execute = False
+        jfmt = ", ".join(f"{v:.4f}" for v in joint_values)
+        self._flog.debug(
+            f"_plan_joint_target: joints=[{jfmt}] execute={execute} "
+            f"dry_run={self._is_dry_run}"
+        )
+        self._flog.debug(
+            f"_plan_joint_target: joints=[{jfmt}] execute={execute}"
+        )
         if not self._move_group_client.wait_for_server(timeout_sec=5.0):
-            self.get_logger().error("move_group action server not available")
+            msg = "move_group action server not available"
+            self.get_logger().error(msg)
+            self._flog.error(msg)
             return PlanResult.PLANNING_FAILED
 
         goal_msg = MoveGroup.Goal()
@@ -797,8 +1115,13 @@ class X3plus5DofPlanner(Node):
         req.planner_id = "RRTConnect"
         req.num_planning_attempts = 10
         req.allowed_planning_time = 2.0
-        req.max_velocity_scaling_factor = 0.3
-        req.max_acceleration_scaling_factor = 0.3
+        req.max_velocity_scaling_factor = 0.1
+        req.max_acceleration_scaling_factor = 0.1
+        self._flog.debug(
+            f"_plan_joint_target: vel_scale={req.max_velocity_scaling_factor} "
+            f"accel_scale={req.max_acceleration_scaling_factor} "
+            f"plan_only={not execute}"
+        )
 
         req.start_state.is_diff = True
 
@@ -830,22 +1153,30 @@ class X3plus5DofPlanner(Node):
 
         future = self._move_group_client.send_goal_async(goal_msg)
         if not self._wait_for_future(future, timeout_sec=10.0):
-            self.get_logger().error("Timed out waiting for goal acceptance")
+            msg = "Timed out waiting for MoveIt goal acceptance"
+            self.get_logger().error(msg)
+            self._flog.error(msg)
             return PlanResult.PLANNING_FAILED
 
         goal_handle = future.result()
         if goal_handle is None or not goal_handle.accepted:
-            self.get_logger().error("Goal rejected by move_group")
+            msg = "Goal rejected by move_group"
+            self.get_logger().error(msg)
+            self._flog.error(msg)
             return PlanResult.PLANNING_FAILED
 
         result_future = goal_handle.get_result_async()
         if not self._wait_for_future(result_future, timeout_sec=30.0):
-            self.get_logger().error("Timed out waiting for planning result")
+            msg = "Timed out waiting for MoveIt planning result"
+            self.get_logger().error(msg)
+            self._flog.error(msg)
             return PlanResult.PLANNING_FAILED
 
         result = result_future.result()
         if result is None:
-            self.get_logger().error("No result from move_group")
+            msg = "No result from move_group"
+            self.get_logger().error(msg)
+            self._flog.error(msg)
             return PlanResult.PLANNING_FAILED
 
         error_code = result.result.error_code.val
@@ -853,9 +1184,14 @@ class X3plus5DofPlanner(Node):
             self._virtual_arm_positions = list(joint_values[:5])
             self._virtual_grip_position = 0.0
             action = "executed" if execute else "planned"
+            self._flog.info(
+                f"MoveIt: motion {action} successfully "
+                f"(plan_only={not execute})"
+            )
             self.get_logger().info(f"Motion {action} successfully")
             return PlanResult.SUCCESS
         else:
+            self._flog.error(f"MoveIt error code: {error_code}")
             self.get_logger().error(f"MoveIt error code: {error_code}")
             self._last_moveit_error = error_code
             return PlanResult.PLANNING_FAILED

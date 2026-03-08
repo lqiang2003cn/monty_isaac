@@ -31,6 +31,8 @@ WORKDIR /ws
 COPY components/ros2_comp/app/monty_demo /ws/src/monty_demo
 # Meshes: single source is shared/x3plus_isaac/meshes/ (overlays any local copy)
 COPY shared/x3plus_isaac/meshes /ws/src/monty_demo/x3plus_robot/meshes
+# Init positions YAML — baked in so it works even without the volume mount
+COPY shared/x3plus_config/init_positions.yaml /shared/x3plus_config/init_positions.yaml
 
 RUN . /opt/ros/jazzy/setup.sh \
     && colcon build --packages-select monty_demo
@@ -72,6 +74,7 @@ WORKDIR /workspace
 
 COPY --from=build /ws/install /workspace/install
 COPY --from=build /shared/x3plus_isaac/urdf/x3plus_isaac.urdf /shared/x3plus_isaac/urdf/x3plus_isaac.urdf
+COPY --from=build /shared/x3plus_config/init_positions.yaml /shared/x3plus_config/init_positions.yaml
 
 # Source ROS2 + workspace in every new shell (docker exec ros2_comp bash and bash -l -c)
 RUN echo 'source /opt/ros/jazzy/setup.bash 2>/dev/null || true' > /etc/profile.d/ros2_workspace.sh \

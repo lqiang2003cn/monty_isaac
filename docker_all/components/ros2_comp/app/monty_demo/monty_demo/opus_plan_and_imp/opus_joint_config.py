@@ -1,9 +1,15 @@
 """
-Shared joint configuration for X3plus: names, servo mapping, rad/deg conversion.
-Used by both Isaac Sim bridge and real robot bridge (position-only).
+Shared joint configuration for X3plus: names, servo mapping, rad/deg conversion,
+and initial (home) joint positions.
+Used by Isaac Sim, real robot bridge, planner, and test scripts.
 """
 
 import math
+import os
+from pathlib import Path
+from typing import Dict, List
+
+import yaml
 
 # Order must match ros2_control / JointStateTopicSystem: 6 actuated + 5 mimic
 JOINT_NAMES = [
@@ -122,3 +128,50 @@ def deg_to_rad(joint_name: str, deg: float) -> float:
     else:
         rad = (deg - m["offset_deg"]) / m["scale"]
     return rad
+
+
+# ---------------------------------------------------------------------------
+# Initial (home) joint positions — loaded from shared YAML
+# ---------------------------------------------------------------------------
+
+_INIT_YAML_PATH = Path(
+    os.environ.get("X3PLUS_INIT_POSITIONS_YAML",
+                   "/shared/x3plus_config/init_positions.yaml")
+)
+
+_FALLBACK_INIT: Dict[str, float] = {
+    "arm_joint1": 0.0,
+    "arm_joint2": -1.0,
+    "arm_joint3": -0.8,
+    "arm_joint4": -1.3416,
+    "arm_joint5": 0.0,
+    "grip_joint": -0.77,
+}
+
+
+def load_init_positions(yaml_path: Path | None = None) -> Dict[str, float]:
+    """Load initial joint positions from the single-source YAML.
+
+    Falls back to built-in defaults if the file is missing (e.g. during
+    unit tests or local development outside Docker).
+    """
+    path = yaml_path or _INIT_YAML_PATH
+    try:
+        with open(path) as f:
+            data = yaml.safe_load(f)
+        if isinstance(data, dict):
+            return {k: float(v) for k, v in data.items() if k in ARM_GRIP_JOINTS}
+    except (FileNotFoundError, TypeError, ValueError):
+        pass
+    return dict(_FALLBACK_INIT)
+
+
+INIT_POSITIONS: Dict[str, float] = load_init_positions()
+
+INIT_ARM_POSITIONS: List[float] = [
+    INIT_POSITIONS[j] for j in ARM_GRIP_JOINTS if j != "grip_joint"
+]
+
+INIT_GRIP_POSITION: float = INIT_POSITIONS.get("grip_joint", -0.77)
+
+INIT_ARM_GRIP_POSITIONS: List[float] = INIT_ARM_POSITIONS + [INIT_GRIP_POSITION]

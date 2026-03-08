@@ -124,7 +124,8 @@ def fk_wrist(qs):
     return T[:3, 3]
 
 
-HOME_JOINTS = [0.0, 0.0, 0.0, 0.0, 0.0]
+from monty_demo.opus_plan_and_imp.opus_joint_config import INIT_ARM_POSITIONS
+HOME_JOINTS = list(INIT_ARM_POSITIONS)
 HOME_XYZ = fk_wrist(HOME_JOINTS)
 
 # ---------------------------------------------------------------------------
@@ -412,29 +413,45 @@ def run_test(points, dry_run=False, go_home=True, pause=1.0,
 
     _publish_ground_plane(node, logger)
 
-    def set_target(x, y, z, execute=True):
+    from rcl_interfaces.msg import Parameter as ParamMsg, ParameterValue, ParameterType
+
+    def _verified_set_params(params_list, label=""):
         req = SetParameters.Request()
-        req.parameters = [
+        req.parameters = params_list
+        future = set_params_cli.call_async(req)
+        rclpy.spin_until_future_complete(node, future, timeout_sec=5.0)
+        if not future.done():
+            logger.error(f"set_params{label}: timed out")
+            return False
+        resp = future.result()
+        if resp is None:
+            logger.error(f"set_params{label}: no response from planner")
+            return False
+        for i, r in enumerate(resp.results):
+            if not r.successful:
+                logger.error(
+                    f"set_params{label}: '{params_list[i].name}' failed: {r.reason}"
+                )
+                return False
+        return True
+
+    def _make_bool_param(name, value):
+        p = ParamMsg()
+        p.name = name
+        pv = ParameterValue()
+        pv.type = ParameterType.PARAMETER_BOOL
+        pv.bool_value = bool(value)
+        p.value = pv
+        return p
+
+    def set_target(x, y, z):
+        return _verified_set_params([
             _make_param("target_x", x),
             _make_param("target_y", y),
             _make_param("target_z", z),
-        ]
-        if dry_run:
-            from rcl_interfaces.msg import Parameter, ParameterValue, ParameterType
-            p = Parameter()
-            p.name = "execute"
-            pv = ParameterValue()
-            pv.type = ParameterType.PARAMETER_BOOL
-            pv.bool_value = execute and (not dry_run)
-            p.value = pv
-            req.parameters.append(p)
-        future = set_params_cli.call_async(req)
-        rclpy.spin_until_future_complete(node, future, timeout_sec=5.0)
-        return future.result()
+        ], " target")
 
     def _spin_with_progress(future, timeout_sec, label=""):
-        """Spin until future completes, printing dots every 5s so the user
-        knows the process isn't dead."""
         deadline = time.time() + timeout_sec
         next_dot = time.time() + 5.0
         while not future.done() and time.time() < deadline:
@@ -455,20 +472,21 @@ def run_test(points, dry_run=False, go_home=True, pause=1.0,
         future = go_home_cli.call_async(req)
         return _spin_with_progress(future, 60.0, " home")
 
-    # Set execute parameter once
+    # Safety lockout: set dry_run=True FIRST, before any motion service call
     if dry_run:
-        from rcl_interfaces.msg import Parameter as ParamMsg, ParameterValue, ParameterType
-        req = SetParameters.Request()
-        p = ParamMsg()
-        p.name = "execute"
-        pv = ParameterValue()
-        pv.type = ParameterType.PARAMETER_BOOL
-        pv.bool_value = False
-        p.value = pv
-        req.parameters = [p]
-        future = set_params_cli.call_async(req)
-        rclpy.spin_until_future_complete(node, future, timeout_sec=5.0)
-        logger.info("DRY RUN: planning only, arm will NOT move")
+        logger.info("Setting dry_run=True on planner (safety lockout)...")
+        if not _verified_set_params(
+            [_make_bool_param("dry_run", True)], " dry_run"
+        ):
+            logger.error(
+                "CRITICAL: Could not set dry_run on planner! Aborting for safety."
+            )
+            rclpy.shutdown()
+            return
+        _verified_set_params(
+            [_make_bool_param("execute", False)], " execute"
+        )
+        logger.info("DRY RUN: dry_run=True + execute=False — arm WILL NOT move")
 
     mode = "DRY RUN" if dry_run else "LIVE"
     logger.info(f"Starting {mode} test: {len(points)} points, "
@@ -523,21 +541,17 @@ def run_test(points, dry_run=False, go_home=True, pause=1.0,
 
     elapsed = time.time() - start_time
 
-    # Restore execute=True if we set it to False
     if dry_run:
         try:
-            req = SetParameters.Request()
-            p = ParamMsg()
-            p.name = "execute"
-            pv = ParameterValue()
-            pv.type = ParameterType.PARAMETER_BOOL
-            pv.bool_value = True
-            p.value = pv
-            req.parameters = [p]
-            future = set_params_cli.call_async(req)
-            rclpy.spin_until_future_complete(node, future, timeout_sec=5.0)
+            _verified_set_params(
+                [_make_bool_param("dry_run", False)], " dry_run_cleanup"
+            )
+            _verified_set_params(
+                [_make_bool_param("execute", True)], " execute_cleanup"
+            )
+            logger.info("dry_run=False, execute=True restored on planner")
         except Exception:
-            pass
+            logger.warning("Could not reset dry_run/execute on planner")
 
     try:
         node.destroy_node()

@@ -1,0 +1,47 @@
+---
+description: X3plus arm gripper geometry — physical layout when gripper faces down
+alwaysApply: true
+---
+
+# X3plus Gripper Geometry (gripper-down orientation)
+
+When the gripper faces straight down (pitch = -pi/2, init position), the physical
+vertical stack from **top to bottom** in world frame is:
+
+1. **arm_link5 mesh** (forearm) — highest, entirely above the wrist origin
+2. **Grip mechanism roots** (grip_joint / llink_joint1 pivots) — 6.85 cm above wrist origin
+3. **Finger bar linkages** (rlink3 / llink3) — 5.05 cm above wrist origin
+4. **Finger joint pivots** (rlink_joint2 / llink_joint2) — 4.75 cm above wrist origin
+5. **arm_link5 origin** (wrist point) — the FK/IK target
+6. **Fingertips** (rlink2 / llink2 mesh tips) — **the LOWEST point**
+
+## Measured distances (from STL mesh bounding boxes)
+
+| Gripper angle     | Fingertip below wrist | Description         |
+|-------------------|-----------------------|---------------------|
+| grip_q = 0.00     | **1.20 cm**           | Fully open          |
+| grip_q = -0.30    | 1.05 cm               |                     |
+| grip_q = -0.50    | 0.80 cm               |                     |
+| grip_q = -0.77    | 0.31 cm               | Init position       |
+| grip_q = -1.00    | fingertips above wrist | Closing             |
+| grip_q = -1.54    | fingertips above wrist | Fully closed        |
+
+The rlink2/llink2 finger meshes extend **5.05 cm** from their joint origins (measured
+from STL bounding box, not the 4.2 cm estimated from inertial COM).
+
+## Floor collision rules
+
+- **FINGERTIP_BELOW_WRIST = 0.012 m** (worst case: fully open gripper)
+- Floor clearance = z_wrist − 0.012 m
+- For any target, verify: `z_wrist >= FINGERTIP_BELOW_WRIST + MIN_FLOOR_CLEARANCE`
+- The wrist (arm_link5 origin) is NOT the lowest point — always check fingertips.
+
+## Common mistake to avoid
+
+Do NOT conclude from URDF local-frame coordinates that "the gripper is above
+arm_link5" or that "arm_link5 is the lowest point." When the gripper faces down,
+arm_link5's Z-axis points toward the floor [0, 0, -1], which flips the mapping:
+local z = -0.0685 maps to +0.0685 in world Z (above wrist). The finger TIP meshes,
+however, extend downward past the wrist because they trace a long arc from the
+elevated pivot through and past the wrist level. Always verify against the actual
+mesh world-Z transform or the robot photos.

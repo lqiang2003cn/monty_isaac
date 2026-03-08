@@ -1,0 +1,89 @@
+---
+description: Logging discipline for the X3plus robot stack — console vs file, detail level, non-blocking writes, and disk management
+alwaysApply: true
+---
+
+# Logging Discipline
+
+Every ROS node and script in this project uses a **two-tier** logging model:
+console (ROS logger) for operators, file (`_flog`) for debugging.
+
+## 1. Console = concise operator view
+
+- Use `self.get_logger()` (rclpy) for console output.
+- **info** — milestones only: node ready, service called, trajectory sent/completed,
+  mode changes, homing done.  One line per event, no arrays or matrices.
+- **warn** — recoverable anomalies: timeout retry, parameter fallback, degraded mode.
+- **error** — failures requiring attention: service unreachable, trajectory rejected,
+  joint limit violation, e-stop active.
+- **Never** use `print()` inside ROS nodes. `print()` is acceptable only in
+  standalone CLI scripts that have no ROS context.
+- **Never** log joint arrays, full trajectories, IK solutions, or matrix dumps to
+  the console. Those belong in the file log.
+
+```python
+# GOOD — console
+self.get_logger().info(f"Trajectory sent: {len(traj.points)} pts, duration={dur:.2f}s")
+
+# BAD — console
+self.get_logger().info(f"Joint targets: {list(joint_positions)}")  # → use _flog
+```
+
+## 2. File log = full debug detail
+
+- Use `make_file_logger()` from `monty_demo.opus_plan_and_imp.log_utils`.
+- Log at **DEBUG** level by default.  Include everything needed to reproduce an
+  issue offline: joint positions, IK inputs/outputs, planning parameters,
+  timestamps, request/response payloads, dry_run/execute decisions.
+- Every safety-critical decision (execute vs plan-only, dry_run state, trajectory
+  acceptance) must be logged to the file with `_flog.critical()` or `_flog.warning()`.
+- Prefix entries with a short context tag when a function handles multiple concerns:
+  `_flog.debug("[IK] ...")`, `_flog.debug("[FJT] ...")`.
+
+```python
+# GOOD — file log
+self._flog.debug(
+    "[IK] target xyz=(%.4f,%.4f,%.4f) pitch=%.4f → joints=%s, success=%s",
+    x, y, z, pitch, joint_vals, success,
+)
+```
+
+## 3. Non-blocking writes — never stall the control loop
+
+- All file loggers write to `/tmp` (tmpfs on Linux — RAM-backed, sub-ms latency).
+- Use `make_file_logger()` which configures `RotatingFileHandler` targeting `/tmp`.
+- **Never** open files, flush, or fsync inside timer callbacks, service handlers,
+  or the joint-state publish loop.  The rotating handler in `log_utils` already
+  handles this safely.
+- If a new node needs file logging, follow the existing pattern:
+
+```python
+from monty_demo.opus_plan_and_imp.log_utils import make_file_logger
+self._flog = make_file_logger("node_name", "/tmp/node_name.log")
+```
+
+## 4. Disk management — rotate and cap
+
+- `log_utils.make_file_logger` uses `RotatingFileHandler`:
+  **5 MB per file, 3 backups → 20 MB max per log**.
+- Do **not** increase `backup_count` above 5 or `max_bytes` above 10 MB without
+  a documented reason.
+- `/tmp` is tmpfs and is cleared on reboot, so logs do not accumulate across
+  reboots.
+- For nodes producing exceptionally high log volume (e.g. joint-state at 50 Hz),
+  throttle file writes with a counter or time gate:
+
+```python
+self._log_counter += 1
+if self._log_counter % 50 == 0:
+    self._flog.debug("[JS] joint_pos=%s (every 50th msg)", pos)
+```
+
+## Quick checklist when adding logging
+
+- [ ] Console message is one short line an operator can glance at
+- [ ] Detailed data goes to `_flog`, not `get_logger()`
+- [ ] `_flog` created via `make_file_logger()` writing to `/tmp`
+- [ ] No `print()` in any ROS node
+- [ ] High-frequency data throttled before file write
+- [ ] Safety decisions logged to file with `critical` or `warning` level

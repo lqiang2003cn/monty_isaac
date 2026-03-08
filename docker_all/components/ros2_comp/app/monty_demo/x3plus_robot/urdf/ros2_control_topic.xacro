@@ -6,8 +6,20 @@
      element in the output (xacro strips the root element of included files).
      Mimic joints (rlink/llink) are NOT listed here; they are computed by the bridge
      nodes and the URDF <mimic> tags handle TF. Jazzy ros2_control rejects mimic
-     joints that appear in ros2_control when the URDF also has <mimic> attributes. -->
+     joints that appear in ros2_control when the URDF also has <mimic> attributes.
+
+     initial_value: bootstrap fallback for ros2_control before the first
+     /x3plus/joint_states message arrives.  Source of truth:
+       shared/x3plus_config/init_positions.yaml
+     Values are passed as xacro args at Docker build time. -->
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:arg name="init_j1"   default="0.0"/>
+  <xacro:arg name="init_j2"   default="-1.0"/>
+  <xacro:arg name="init_j3"   default="-0.8"/>
+  <xacro:arg name="init_j4"   default="-1.3416"/>
+  <xacro:arg name="init_j5"   default="0.0"/>
+  <xacro:arg name="init_grip" default="-0.77"/>
+
   <ros2_control name="x3plus" type="system">
     <hardware>
       <plugin>joint_state_topic_hardware_interface/JointStateTopicSystem</plugin>
@@ -20,42 +32,42 @@
         <param name="min">-1.5708</param>
         <param name="max">1.5708</param>
       </command_interface>
-      <state_interface name="position"><param name="initial_value">0.0</param></state_interface>
+      <state_interface name="position"><param name="initial_value">$(arg init_j1)</param></state_interface>
     </joint>
     <joint name="arm_joint2">
       <command_interface name="position">
         <param name="min">-1.5708</param>
         <param name="max">1.5708</param>
       </command_interface>
-      <state_interface name="position"><param name="initial_value">0.0</param></state_interface>
+      <state_interface name="position"><param name="initial_value">$(arg init_j2)</param></state_interface>
     </joint>
     <joint name="arm_joint3">
       <command_interface name="position">
         <param name="min">-1.5708</param>
         <param name="max">1.5708</param>
       </command_interface>
-      <state_interface name="position"><param name="initial_value">0.0</param></state_interface>
+      <state_interface name="position"><param name="initial_value">$(arg init_j3)</param></state_interface>
     </joint>
     <joint name="arm_joint4">
       <command_interface name="position">
         <param name="min">-1.5708</param>
         <param name="max">1.5708</param>
       </command_interface>
-      <state_interface name="position"><param name="initial_value">0.0</param></state_interface>
+      <state_interface name="position"><param name="initial_value">$(arg init_j4)</param></state_interface>
     </joint>
     <joint name="arm_joint5">
       <command_interface name="position">
         <param name="min">-1.5708</param>
         <param name="max">3.14159</param>
       </command_interface>
-      <state_interface name="position"><param name="initial_value">0.0</param></state_interface>
+      <state_interface name="position"><param name="initial_value">$(arg init_j5)</param></state_interface>
     </joint>
     <joint name="grip_joint">
       <command_interface name="position">
         <param name="min">-1.54</param>
         <param name="max">0</param>
       </command_interface>
-      <state_interface name="position"><param name="initial_value">-0.77</param></state_interface>
+      <state_interface name="position"><param name="initial_value">$(arg init_grip)</param></state_interface>
     </joint>
   </ros2_control>
 </robot>

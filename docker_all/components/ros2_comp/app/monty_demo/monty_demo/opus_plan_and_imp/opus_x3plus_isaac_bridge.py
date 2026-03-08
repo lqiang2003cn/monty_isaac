@@ -62,16 +62,6 @@ if _os.path.isdir(_INTERNAL_RCLPY_DIR) and _INTERNAL_RCLPY_DIR not in _sys.path:
     _sys.path.insert(0, _INTERNAL_RCLPY_DIR)
 # ────────────────────────────────────────────────────────────────────────────
 
-# #region agent log
-import json as _json, time as _time
-_DLOG = "/home/lq/lqtech/dockers/monty_isaac/.cursor/debug-888899.log"
-_dlog_counter = [0]
-def _dlog(hyp, loc, msg, data=None):
-    _dlog_counter[0] += 1
-    with open(_DLOG, "a") as f:
-        f.write(_json.dumps({"sessionId": "888899", "id": f"log_{_dlog_counter[0]}", "timestamp": int(_time.time()*1000), "location": loc, "message": msg, "data": data or {}, "hypothesisId": hyp}) + "\n")
-# #endregion
-
 import numpy as np  # noqa: E402
 
 print("=" * 50)
@@ -92,6 +82,9 @@ from omni.kit.app import get_app  # noqa: E402
 
 from monty_demo.opus_plan_and_imp.opus_joint_config import (
     ARM_GRIP_JOINTS,
+    INIT_ARM_GRIP_POSITIONS,
+    INIT_GRIP_POSITION,
+    INIT_POSITIONS,
     JOINT_NAMES,
     MIMIC_MAP,
 )
@@ -110,9 +103,8 @@ print("ROS2 Bridge extension enabled")
 JOINT_STATES_TOPIC = "/x3plus/joint_states"
 JOINT_COMMANDS_TOPIC = "/x3plus/joint_commands"
 
-# Default "open" gripper pose
-DEFAULT_GRIP_POS = -0.77
-DEFAULT_ARM_GRIP_POSITIONS = [0.0, 0.0, 0.0, 0.0, 0.0, DEFAULT_GRIP_POS]
+DEFAULT_GRIP_POS = INIT_GRIP_POSITION
+DEFAULT_ARM_GRIP_POSITIONS = list(INIT_ARM_GRIP_POSITIONS)
 
 # Mimic list in order for iteration
 GRIPPER_MIMIC = [(name, MIMIC_MAP[name][1]) for name in JOINT_NAMES if name in MIMIC_MAP]
@@ -196,8 +188,8 @@ def main() -> None:
         if art.num_dof and art.num_dof > 0:
             default_positions = {}
             for name in JOINT_NAMES:
-                if name == "grip_joint":
-                    default_positions[name] = DEFAULT_GRIP_POS
+                if name in INIT_POSITIONS:
+                    default_positions[name] = INIT_POSITIONS[name]
                 elif name in MIMIC_MAP:
                     mult = MIMIC_MAP[name][1]
                     default_positions[name] = mult * DEFAULT_GRIP_POS
@@ -219,10 +211,6 @@ def main() -> None:
         from sensor_msgs.msg import JointState
         from rclpy.node import Node
         from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
-        # #region agent log
-        _dlog("H1", "bridge:rclpy_import", "rclpy imported OK", {"file": rclpy.__file__})
-        # #endregion
-
         class X3PlusROS2Bridge(Node):
             def __init__(self) -> None:
                 super().__init__("opus_x3plus_isaac_bridge")
@@ -242,9 +230,6 @@ def main() -> None:
             def _joint_commands_cb(self, msg: JointState) -> None:
                 if msg.name and len(msg.position) >= len(msg.name):
                     self._latest_commands = (list(msg.name), list(msg.position[: len(msg.name)]))
-                    # #region agent log
-                    _dlog("H3", "bridge:cmd_cb", "command received", {"names": list(msg.name), "positions": list(msg.position[:len(msg.name)])})
-                    # #endregion
 
             def get_latest_commands(self) -> tuple[list[str], list[float]] | None:
                 return self._latest_commands
@@ -258,32 +243,17 @@ def main() -> None:
 
         rclpy.init()
         ros_node = X3PlusROS2Bridge()
-        # #region agent log
-        _dlog("H2", "bridge:rclpy_init", "rclpy.init + node created OK", {"node_name": ros_node.get_name()})
-        # #endregion
         print(f"ROS2 bridge: publish {JOINT_STATES_TOPIC}, subscribe {JOINT_COMMANDS_TOPIC}")
     except ImportError as e:
-        # #region agent log
-        _dlog("H1", "bridge:rclpy_import_fail", "rclpy import FAILED", {"error": str(e)})
-        # #endregion
         print(f"Warning: rclpy not available ({e}). Run with ROS2 environment for ros2_control.")
         ros_node = None
     except Exception as e:
-        # #region agent log
-        _dlog("H2", "bridge:rclpy_init_fail", "rclpy init FAILED", {"error": str(e), "type": type(e).__name__})
-        # #endregion
         print(f"Warning: rclpy init failed ({e}).")
         ros_node = None
 
-    # #region agent log
-    _phys_cb_count = [0]
-    # #endregion
     def _ros2_physics_callback(dt: float) -> None:
         if art is None or ros_node is None:
             return
-        # #region agent log
-        _phys_cb_count[0] += 1
-        # #endregion
         try:
             name_to_idx = {n: art.get_dof_index(n) for n in JOINT_NAMES}
             name_to_idx = {n: i for n, i in name_to_idx.items() if i >= 0}
@@ -307,10 +277,6 @@ def main() -> None:
                         joint_positions=np.array(values, dtype=np.float64),
                         joint_indices=np.array(indices, dtype=np.int32),
                     ))
-                    # #region agent log
-                    if _phys_cb_count[0] % 100 == 1:
-                        _dlog("H4", "bridge:apply_cmd", "applied position targets", {"indices": indices, "values": values, "cb_count": _phys_cb_count[0]})
-                    # #endregion
             else:
                 arm_grip_indices = np.array(
                     [art.get_dof_index(n) for n in ARM_GRIP_JOINTS],
@@ -346,22 +312,11 @@ def main() -> None:
                     positions_out.append(float(pos[idx]))
             if names_out and positions_out:
                 ros_node.publish_joint_state(names_out, positions_out)
-                # #region agent log
-                if _phys_cb_count[0] % 200 == 1:
-                    _dlog("H5", "bridge:pub_state", "published joint state", {"names": names_out[:3], "positions": [round(p,4) for p in positions_out[:3]], "total": len(names_out), "cb_count": _phys_cb_count[0]})
-                # #endregion
         except Exception as e:
             print(f"Warning: ROS2 physics callback failed: {e}")
 
     if art is not None and ros_node is not None:
         world.add_physics_callback("opus_x3plus_ros2_bridge", _ros2_physics_callback)
-        # #region agent log
-        _dlog("H4", "bridge:callback_registered", "physics callback registered", {"art_num_dof": art.num_dof})
-        # #endregion
-    else:
-        # #region agent log
-        _dlog("H4", "bridge:callback_NOT_registered", "physics callback NOT registered", {"art_is_none": art is None, "ros_node_is_none": ros_node is None})
-        # #endregion
 
     print("Running simulation. Start bringup in another terminal for ros2_control. Press Ctrl+C to exit.\n")
 

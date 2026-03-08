@@ -163,11 +163,13 @@ cd "$DOCKER_ALL"
 
 export ROBOT_MODE=zmq
 export USE_MOVEIT=true
+export DEBUG_LOGS="${DEBUG_LOGS:-true}"
 
 # If no args (or only empty arg), default to "up --build" so logs stream to terminal
 if [[ $# -eq 0 ]] || { [[ $# -eq 1 ]] && [[ -z "${1:-}" ]]; }; then
   echo "[real_up] No arguments: starting local stack (docker compose up --build). Logs will stream below."
-  echo "[real_up] ROBOT_MODE=$ROBOT_MODE  USE_MOVEIT=$USE_MOVEIT"
+  echo "[real_up] ROBOT_MODE=$ROBOT_MODE  USE_MOVEIT=$USE_MOVEIT  DEBUG_LOGS=$DEBUG_LOGS"
   set -- up --build
 fi
+echo "[real_up] go_home will execute automatically once the planner and MoveIt are ready."
 exec docker compose "$@"

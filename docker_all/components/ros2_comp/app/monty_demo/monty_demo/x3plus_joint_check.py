@@ -19,9 +19,11 @@ import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
 
+from monty_demo.opus_plan_and_imp.opus_joint_config import INIT_ARM_POSITIONS
+
 ARM_JOINTS = ["arm_joint1", "arm_joint2", "arm_joint3", "arm_joint4", "arm_joint5"]
 
-HOME = [0.0, 0.0, 0.0, 0.0, 0.0]
+HOME = list(INIT_ARM_POSITIONS)
 
 L1 = 0.0829
 L2 = 0.0829

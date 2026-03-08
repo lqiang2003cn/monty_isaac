@@ -1,0 +1,178 @@
+---
+description: Safety rules for any code that can cause real robot motion — must be respected in every plan, review, and edit
+alwaysApply: true
+---
+
+# Robot Motion Safety Rules
+
+These rules apply whenever planning, writing, or modifying code that can cause
+physical robot movement (planner, bridge, controller, test scripts, launch files).
+
+---
+
+## Part A — Software lockout and parameter safety
+
+### 1. Dry-run must be a hard lockout, not a suggestion
+
+- A `dry_run` flag must **block execution at multiple independent levels**
+  (defense-in-depth), not rely on a single parameter read.
+- Dry-run gates must exist in: the service callback, the planning function,
+  AND the trajectory-send function. If any one gate is bypassed, the others
+  must still prevent motion.
+- Never hardcode `execute=True` in timers, callbacks, or startup routines.
+  Always read the safety parameter or accept it as an argument that respects
+  the lockout.
+
+### 2. No shared-mutable-state for safety-critical flags
+
+- Do not use a single ROS parameter (`execute`) as the sole mechanism to
+  prevent motion. Parameters are shared state — races between `set_parameters`
+  and service triggers can leave the flag stale.
+- Always pair the per-request `execute` flag with a planner-level `dry_run`
+  lockout that cannot be accidentally overridden by concurrent callers.
+
+### 3. Startup routines must not bypass safety
+
+- Any auto-startup behavior (e.g. `go_home_on_start` timer) MUST check the
+  `dry_run` lockout before executing. Startup code is especially dangerous
+  because it races with external callers.
+- Prefer explicit "go home" commands from the user/test over automatic timers.
+
+### 4. Verify parameter-set success before proceeding
+
+- After calling `SetParameters`, always check:
+  `future.done()`, `response is not None`, and each `result.successful`.
+- If any check fails, **abort** — do not proceed with a stale parameter value.
+
+### 5. Log every execution decision to a file
+
+- Every code path that decides whether to move the arm must log:
+  the decision (execute vs plan-only), the `dry_run` and `execute` values,
+  and the caller context — to a persistent file (`/tmp/*.log`), not just
+  the terminal which scrolls too fast.
+- Trajectory acceptance by the controller must be logged with "ARM IS MOVING".
+
+### 6. Test scripts must activate lockout FIRST
+
+- A dry-run test must set `dry_run=True` on the planner **as its very first
+  ROS action** — before waiting for other services, before triggering any
+  motion service.
+- Clean up (`dry_run=False`) in a finally/cleanup block so the planner
+  returns to normal after the test, even on crash or Ctrl-C.
+
+---
+
+## Part B — Velocity, joint, and workspace limits
+
+### 7. Enforce joint position and velocity limits in software
+
+- Every joint must have configurable upper/lower position bounds and a maximum
+  velocity limit. Load these from a YAML config, never hardcode them.
+- The planner and the controller must both independently reject trajectories
+  that violate joint limits (defense-in-depth, same principle as dry-run).
+- Use `joint_limits_interface` or equivalent saturation layer so that even if
+  the planner produces an out-of-range command, the controller clamps it.
+
+### 8. Cap tool-center-point (TCP) speed
+
+- Define a maximum Cartesian speed for the end effector (e.g. 250 mm/s for
+  hand-guiding, higher only after explicit risk assessment per ISO/TS 15066).
+- Validate planned Cartesian velocities before sending; abort if any segment
+  exceeds the limit.
+- During manual/teleoperation modes, enforce a lower speed cap than in
+  autonomous mode.
+
+### 9. Define and enforce workspace boundaries
+
+- Maintain a set of safety planes or bounding volumes that the tool and elbow
+  must stay within. Define these in config, not in code.
+- Before executing any trajectory, verify every waypoint lies inside the
+  allowed workspace. Reject the entire trajectory if any waypoint violates.
+- Include a floor-clearance check: `z_wrist >= FINGERTIP_BELOW_WRIST +
+  MIN_FLOOR_CLEARANCE` (see gripper-geometry rule for values).
+
+---
+
+## Part C — Emergency stop and graceful degradation
+
+### 10. Emergency stop must be hardware-level, not just software
+
+- ROS-based e-stop topics or services are **not safety-rated**. They must be
+  a convenience layer on top of a physical e-stop button, never the sole
+  mechanism.
+- Keep a hardware e-stop button within immediate reach at all times.
+- Software must monitor the e-stop state and refuse to send new commands
+  while e-stop is active.
+
+### 11. Implement a communication watchdog / heartbeat
+
+- The bridge node (Isaac or ZMQ) must send periodic heartbeats to the
+  controller. If the controller receives no heartbeat within a configurable
+  timeout (e.g. 500 ms), it must trigger a controlled stop (Category 1:
+  decelerate then power off, not abrupt Category 0).
+- Similarly, if the planner loses contact with the bridge, it must stop
+  issuing new trajectories and log a warning.
+
+### 12. Handle errors with graceful degradation, not silent continuation
+
+- Any trajectory execution failure (controller rejection, timeout, joint
+  fault) must halt the current task and log the error before attempting
+  recovery.
+- Never retry a failed trajectory automatically without re-validating the
+  robot's current state (joint positions, e-stop status, controller mode).
+- After a fault, require explicit operator acknowledgement or a fresh
+  service call before resuming motion.
+
+---
+
+## Part D — Pre-operation and environment safety
+
+### 13. Pre-operation checklist (before running any real-robot code)
+
+- Verify the physical workspace is clear of obstacles and personnel within
+  the robot's reachable envelope (at least 1 m clearance on all sides).
+- Confirm the hardware e-stop button is functional and within reach.
+- Confirm joint zero positions / home position match the expected URDF
+  configuration — a mis-homed joint can cause wild swings.
+- Run a plan-only (dry-run) pass of the intended trajectory and visually
+  inspect it in RViz or the simulator before enabling execution.
+
+### 14. Never trust the first motion after power-on
+
+- After power-on or controller restart, read the actual joint positions from
+  encoders and compare against the expected home/init position.
+- If any joint deviates more than a configurable threshold (e.g. 5 degrees),
+  halt and require manual intervention rather than commanding a blind
+  "go home" that could collide with the environment.
+
+### 15. Payload and force awareness
+
+- Never exceed the arm's rated payload. Verify the combined weight of the
+  gripper + grasped object before executing a trajectory.
+- If available, monitor joint torques during execution. A sudden spike above
+  a configurable threshold indicates a collision — trigger a stop.
+
+---
+
+## Part E — Code review and testing discipline
+
+### 16. Simulation before real hardware — always
+
+- Every new trajectory, planner change, or controller configuration must be
+  tested in the Isaac Sim (or equivalent) environment first.
+- Never merge code that has only been tested on real hardware without a
+  corresponding simulation test that can be re-run in CI.
+
+### 17. Incremental deployment with reduced limits
+
+- When deploying new motion code to real hardware for the first time, use
+  reduced velocity limits (e.g. 25% of normal) and a constrained workspace.
+- Only increase limits after successful runs with an operator present and
+  e-stop in hand.
+
+### 18. Two-person rule for first-time real execution
+
+- The first real execution of any new trajectory or planner behavior should
+  have two people present: one operating the software, one with hand on the
+  hardware e-stop.
+- This rule can be relaxed for repeat runs of proven trajectories.

@@ -1,0 +1,9 @@
+# Single source of truth for the robot's initial/home joint positions.
+# All components (Isaac Sim, ros2_control, planner, tests) load from here.
+# Gripper faces straight down: pitch = -pi/2  (q2+q3+q4 = -pi).
+arm_joint1: 0.0
+arm_joint2: -1.0
+arm_joint3: -0.8
+arm_joint4: -1.3416
+arm_joint5: 0.0
+grip_joint: -0.77

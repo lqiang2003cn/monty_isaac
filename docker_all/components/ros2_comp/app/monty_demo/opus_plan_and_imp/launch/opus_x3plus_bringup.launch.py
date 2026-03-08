@@ -45,6 +45,10 @@ def generate_launch_description():
     mode_is_real = PythonExpression(["'", LaunchConfiguration("mode"), "' == 'real'"])
     mode_is_zmq = PythonExpression(["'", LaunchConfiguration("mode"), "' == 'zmq'"])
     use_moveit = LaunchConfiguration("use_moveit")
+    debug_logs = LaunchConfiguration("debug_logs")
+    log_level = PythonExpression([
+        "'debug' if '", debug_logs, "' == 'true' else 'info'",
+    ])
 
     moveit_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -59,6 +63,7 @@ def generate_launch_description():
         DeclareLaunchArgument("zmq_host", default_value="192.168.31.142", description="ZMQ service host (mode:=zmq)"),
         DeclareLaunchArgument("zmq_port", default_value="5555", description="ZMQ service port (mode:=zmq)"),
         DeclareLaunchArgument("use_moveit", default_value="false", description="Launch MoveIt move_group"),
+        DeclareLaunchArgument("debug_logs", default_value="true", description="Enable debug-level logging on planner and bridge nodes"),
         Node(
             package="robot_state_publisher",
             executable="robot_state_publisher",
@@ -112,6 +117,7 @@ def generate_launch_description():
             parameters=[
                 {"serial_port": LaunchConfiguration("serial_port")},
             ],
+            ros_arguments=["--log-level", log_level],
         ),
         Node(
             package="monty_demo",
@@ -123,6 +129,7 @@ def generate_launch_description():
                 {"zmq_host": LaunchConfiguration("zmq_host")},
                 {"zmq_port": LaunchConfiguration("zmq_port")},
             ],
+            ros_arguments=["--log-level", log_level],
         ),
         moveit_launch,
         Node(
@@ -131,5 +138,6 @@ def generate_launch_description():
             name="x3plus_5dof_planner",
             output="screen",
             condition=IfCondition(use_moveit),
+            ros_arguments=["--log-level", log_level],
         ),
     ])

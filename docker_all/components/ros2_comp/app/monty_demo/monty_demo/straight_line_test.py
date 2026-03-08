@@ -130,7 +130,8 @@ def fk_wrist(qs):
     return T[:3, 3]
 
 
-HOME_JOINTS = [0.0, 0.0, 0.0, 0.0, 0.0]
+from monty_demo.opus_plan_and_imp.opus_joint_config import INIT_ARM_POSITIONS
+HOME_JOINTS = list(INIT_ARM_POSITIONS)
 HOME_XYZ = fk_wrist(HOME_JOINTS)
 
 # ---------------------------------------------------------------------------
@@ -367,17 +368,20 @@ def _make_param(name, value):
 def run_test(candidates, num_points, dry_run=False, pause=0.5,
              results_path="straight_line_test_results.json",
              viz_path="straight_line_test_results.png",
-             skip_validation=False):
+             skip_validation=False, verbose=False):
     """Validate candidate points via planner dry-run, then execute."""
     import rclpy
     from rclpy.node import Node
     from rcl_interfaces.srv import SetParameters
     from rcl_interfaces.msg import Parameter as ParamMsg, ParameterValue, ParameterType
     from std_srvs.srv import Trigger
+    import logging
 
     rclpy.init()
     node = Node("straight_line_test")
     logger = node.get_logger()
+    if verbose:
+        logger.set_level(logging.DEBUG)
 
     set_params_cli = node.create_client(
         SetParameters, f"{PLANNER_NODE}/set_parameters"
@@ -415,44 +419,92 @@ def run_test(candidates, num_points, dry_run=False, pause=0.5,
                 next_dot = time.time() + 5.0
         return future.result()
 
-    def set_execute(value):
+    def _verified_set_params(params_list, label=""):
+        """Set parameters on the planner and verify every result succeeded."""
         req = SetParameters.Request()
+        req.parameters = params_list
+        future = set_params_cli.call_async(req)
+        rclpy.spin_until_future_complete(node, future, timeout_sec=5.0)
+        if not future.done():
+            logger.error(f"set_params{label}: timed out")
+            return False
+        resp = future.result()
+        if resp is None:
+            logger.error(f"set_params{label}: no response from planner")
+            return False
+        for i, r in enumerate(resp.results):
+            if not r.successful:
+                logger.error(
+                    f"set_params{label}: '{params_list[i].name}' failed: {r.reason}"
+                )
+                return False
+        return True
+
+    def _make_bool_param(name, value):
         p = ParamMsg()
-        p.name = "execute"
+        p.name = name
         pv = ParameterValue()
         pv.type = ParameterType.PARAMETER_BOOL
         pv.bool_value = bool(value)
         p.value = pv
-        req.parameters = [p]
-        future = set_params_cli.call_async(req)
-        rclpy.spin_until_future_complete(node, future, timeout_sec=5.0)
+        return p
+
+    def set_execute(value):
+        return _verified_set_params(
+            [_make_bool_param("execute", value)], " execute"
+        )
+
+    def set_dry_run(value):
+        return _verified_set_params(
+            [_make_bool_param("dry_run", value)], " dry_run"
+        )
 
     def set_target(x, y, z):
-        req = SetParameters.Request()
-        req.parameters = [
+        logger.debug(f"set_target: ({x:.4f}, {y:.4f}, {z:.4f})")
+        return _verified_set_params([
             _make_param("target_x", x),
             _make_param("target_y", y),
             _make_param("target_z", z),
-        ]
-        future = set_params_cli.call_async(req)
-        rclpy.spin_until_future_complete(node, future, timeout_sec=5.0)
-        return future.result()
+        ], " target")
 
     def call_plan_position(timeout=60.0):
+        logger.debug("calling plan_position")
         future = plan_pos_cli.call_async(Trigger.Request())
-        return _spin_with_progress(future, timeout, " plan")
+        resp = _spin_with_progress(future, timeout, " plan")
+        if resp:
+            logger.debug(f"plan_position: ok={resp.success} msg={resp.message}")
+        return resp
 
     def call_straight_line(timeout=120.0):
+        logger.debug("calling plan_straight_line")
         future = straight_line_cli.call_async(Trigger.Request())
-        return _spin_with_progress(future, timeout, " line")
+        resp = _spin_with_progress(future, timeout, " line")
+        if resp:
+            logger.debug(f"plan_straight_line: ok={resp.success} msg={resp.message}")
+        return resp
 
     def call_go_home(timeout=60.0):
+        logger.debug("calling go_home")
         future = go_home_cli.call_async(Trigger.Request())
-        return _spin_with_progress(future, timeout, " home")
+        resp = _spin_with_progress(future, timeout, " home")
+        if resp:
+            logger.debug(f"go_home: ok={resp.success} msg={resp.message}")
+        return resp
 
     # ==================================================================
     # Phase 1: Validate chain via planner dry-run
     # ==================================================================
+
+    # Safety lockout: set dry_run=True FIRST, before any motion service call
+    if dry_run:
+        logger.info("Setting dry_run=True on planner (safety lockout)...")
+        if not set_dry_run(True):
+            logger.error(
+                "CRITICAL: Could not set dry_run on planner! Aborting for safety."
+            )
+            rclpy.shutdown()
+            return
+        logger.info("dry_run=True confirmed on planner — arm WILL NOT move")
 
     if skip_validation:
         validated = list(candidates[:num_points])
@@ -534,9 +586,11 @@ def run_test(candidates, num_points, dry_run=False, pause=0.5,
         print("\nDRY RUN complete — all segments validated, arm did not move.")
         visualize_points(validated, out_path=viz_path)
         try:
+            set_dry_run(False)
             set_execute(True)
+            logger.info("dry_run=False, execute=True restored on planner")
         except Exception:
-            pass
+            logger.warning("Could not reset dry_run/execute on planner")
         try:
             node.destroy_node()
         except Exception:
@@ -739,6 +793,10 @@ def main():
         "--points-file", type=str, default=None,
         help="Load pre-validated points from a JSON file (skips generation + validation)"
     )
+    parser.add_argument(
+        "--verbose", "-v", action="store_true",
+        help="Enable debug-level logging for service calls and responses"
+    )
     args = parser.parse_args()
 
     if args.points_file and os.path.exists(args.points_file):
@@ -752,6 +810,7 @@ def main():
             dry_run=args.dry_run,
             pause=args.pause,
             skip_validation=True,
+            verbose=args.verbose,
         )
         return
 
@@ -774,6 +833,7 @@ def main():
         candidates, args.num_points,
         dry_run=args.dry_run,
         pause=args.pause,
+        verbose=args.verbose,
     )
 
 
