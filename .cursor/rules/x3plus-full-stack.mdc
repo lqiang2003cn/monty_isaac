@@ -1,0 +1,752 @@
+---
+description: "The X3plus bible: safety, gripper geometry, motion tuning, pick-place pipeline, BehaviorTree architecture, and resolved bugs — must be respected in every plan, review, and edit"
+alwaysApply: true
+---
+
+# X3plus Full-Stack Rules
+
+The single authoritative reference for all X3plus arm development. Covers
+safety lockouts, hardware geometry, motion tuning, the validated pick-and-place
+pipeline, BehaviorTree integration, and a resolved-bugs registry.
+
+These rules apply whenever planning, writing, or modifying code that can cause
+physical robot movement (planner, bridge, controller, BT executor, test scripts,
+launch files).
+
+---
+
+## Part A — Software lockout and parameter safety
+
+### 1. Dry-run must be a hard lockout, not a suggestion
+
+- A `dry_run` flag must **block execution at multiple independent levels**
+  (defense-in-depth), not rely on a single parameter read.
+- Dry-run gates must exist in: the service callback, the planning function,
+  AND the trajectory-send function. If any one gate is bypassed, the others
+  must still prevent motion.
+- Never hardcode `execute=True` in timers, callbacks, or startup routines.
+  Always read the safety parameter or accept it as an argument that respects
+  the lockout.
+
+### 2. No shared-mutable-state for safety-critical flags
+
+- Do not use a single ROS parameter (`execute`) as the sole mechanism to
+  prevent motion. Parameters are shared state — races between `set_parameters`
+  and service triggers can leave the flag stale.
+- Always pair the per-request `execute` flag with a planner-level `dry_run`
+  lockout that cannot be accidentally overridden by concurrent callers.
+
+### 3. Startup routines must not bypass safety
+
+- Any auto-startup behavior (e.g. `go_home_on_start` timer) MUST check the
+  `dry_run` lockout before executing. Startup code is especially dangerous
+  because it races with external callers.
+- Prefer explicit "go home" commands from the user/test over automatic timers.
+
+### 4. Verify parameter-set success before proceeding
+
+- After calling `SetParameters`, always check:
+  `future.done()`, `response is not None`, and each `result.successful`.
+- If any check fails, **abort** — do not proceed with a stale parameter value.
+
+### 5. Log every execution decision to a file
+
+- Every code path that decides whether to move the arm must log:
+  the decision (execute vs plan-only), the `dry_run` and `execute` values,
+  and the caller context — to a persistent file (`/tmp/*.log`), not just
+  the terminal which scrolls too fast.
+- Trajectory acceptance by the controller must be logged with "ARM IS MOVING".
+
+### 6. Test scripts must activate lockout FIRST
+
+- A dry-run test must set `dry_run=True` on the planner **as its very first
+  ROS action** — before waiting for other services, before triggering any
+  motion service.
+- Clean up (`dry_run=False`) in a finally/cleanup block so the planner
+  returns to normal after the test, even on crash or Ctrl-C.
+
+---
+
+## Part B — Velocity, joint, and workspace limits
+
+### 7. Enforce joint position and velocity limits in software
+
+- Every joint must have configurable upper/lower position bounds and a maximum
+  velocity limit. Load these from a YAML config, never hardcode them.
+- The planner and the controller must both independently reject trajectories
+  that violate joint limits (defense-in-depth, same principle as dry-run).
+- Use `joint_limits_interface` or equivalent saturation layer so that even if
+  the planner produces an out-of-range command, the controller clamps it.
+
+### 8. Cap tool-center-point (TCP) speed
+
+- Define a maximum Cartesian speed for the end effector (e.g. 250 mm/s for
+  hand-guiding, higher only after explicit risk assessment per ISO/TS 15066).
+- Validate planned Cartesian velocities before sending; abort if any segment
+  exceeds the limit.
+- During manual/teleoperation modes, enforce a lower speed cap than in
+  autonomous mode.
+
+### 9. Define and enforce workspace boundaries
+
+- Maintain a set of safety planes or bounding volumes that the tool and elbow
+  must stay within. Define these in config, not in code.
+- Before executing any trajectory, verify every waypoint lies inside the
+  allowed workspace. Reject the entire trajectory if any waypoint violates.
+- Include a floor-clearance check: `z_wrist >= FINGERTIP_BELOW_WRIST +
+  MIN_FLOOR_CLEARANCE` (see Part I — Gripper geometry for values).
+
+---
+
+## Part C — Emergency stop and graceful degradation
+
+### 10. Emergency stop must be hardware-level, not just software
+
+- ROS-based e-stop topics or services are **not safety-rated**. They must be
+  a convenience layer on top of a physical e-stop button, never the sole
+  mechanism.
+- Keep a hardware e-stop button within immediate reach at all times.
+- Software must monitor the e-stop state and refuse to send new commands
+  while e-stop is active.
+
+### 11. Implement a communication watchdog / heartbeat
+
+- The bridge node (Isaac or ZMQ) must send periodic heartbeats to the
+  controller. If the controller receives no heartbeat within a configurable
+  timeout (e.g. 500 ms), it must trigger a controlled stop (Category 1:
+  decelerate then power off, not abrupt Category 0).
+- Similarly, if the planner loses contact with the bridge, it must stop
+  issuing new trajectories and log a warning.
+
+### 12. Handle errors with graceful degradation, not silent continuation
+
+- Any trajectory execution failure (controller rejection, timeout, joint
+  fault) must halt the current task and log the error before attempting
+  recovery.
+- Never retry a failed trajectory automatically without re-validating the
+  robot's current state (joint positions, e-stop status, controller mode).
+- After a fault, require explicit operator acknowledgement or a fresh
+  service call before resuming motion.
+
+---
+
+## Part D — Pre-operation and environment safety
+
+### 13. Pre-operation checklist (before running any real-robot code)
+
+- Verify the physical workspace is clear of obstacles and personnel within
+  the robot's reachable envelope (at least 1 m clearance on all sides).
+- Confirm the hardware e-stop button is functional and within reach.
+- Confirm joint zero positions / home position match the expected URDF
+  configuration — a mis-homed joint can cause wild swings.
+- Run a plan-only (dry-run) pass of the intended trajectory and visually
+  inspect it in RViz or the simulator before enabling execution.
+
+### 14. Never trust the first motion after power-on
+
+- After power-on or controller restart, read the actual joint positions from
+  encoders and compare against the expected home/init position.
+- If any joint deviates more than a configurable threshold (e.g. 5 degrees),
+  halt and require manual intervention rather than commanding a blind
+  "go home" that could collide with the environment.
+
+### 15. Payload and force awareness
+
+- Never exceed the arm's rated payload. Verify the combined weight of the
+  gripper + grasped object before executing a trajectory.
+- If available, monitor joint torques during execution. A sudden spike above
+  a configurable threshold indicates a collision — trigger a stop.
+
+---
+
+## Part E — Bridge hardware-feedback safety
+
+These rules were added after a 2026-03-08 incident where the bridge detected
+servo deviations up to 203° and invalid (negative) servo positions but kept
+sending commands, causing violent jerky oscillation of the real arm.
+
+### 16. Deviation detection must trigger a safety lockout, not just log
+
+- If any joint's actual position deviates from its last commanded position by
+  more than `DEVIATION_LOCKOUT_DEG` (default 30°) for `DEVIATION_LOCKOUT_COUNT`
+  (default 3) consecutive reads, the bridge must **hard-stop**: refuse all
+  further command forwarding and state publishing until the node is restarted.
+- Logging alone is not a safety mechanism. The bridge had code to detect 169°
+  deviations and only wrote an error message while continuing to forward
+  commands — this is the pattern that caused hardware damage.
+- The lockout must be a boolean flag (`_safety_lockout`) checked at the top of
+  both the command callback and the state-publish timer. Once set, it is
+  permanent for the lifetime of the node.
+
+### 17. Never fabricate joint positions for missing servo data
+
+- When hardware returns invalid readings (e.g. negative positions meaning "no
+  servo response"), the bridge must **not** substitute a default value (like
+  90°) and publish it as real state. This poisons the controller's feedback
+  loop: it sees a phantom position jump, generates a corrective trajectory,
+  the servos jerk, readings get more corrupted, and the cycle repeats.
+- Instead: hold the last known good position (`_last_good_hw_deg`) and publish
+  that. If no good position has been recorded yet, skip publishing entirely.
+- Invalid reads must increment a consecutive counter. After
+  `INVALID_POS_LOCKOUT_COUNT` (default 5) consecutive bad reads, trigger the
+  safety lockout (rule 16).
+
+### 18. Bridge safety constants must be defined, not buried in logic
+
+The following constants must be declared at module level in the bridge, with
+values tuned for the X3plus servo response characteristics:
+
+| Constant | Default | Purpose |
+|---|---|---|
+| `DEVIATION_WARN_DEG` | 5.0 | Log warning to file |
+| `DEVIATION_CRIT_DEG` | 10.0 | Log critical + console error |
+| `DEVIATION_LOCKOUT_DEG` | 30.0 | Trigger safety lockout |
+| `DEVIATION_LOCKOUT_COUNT` | 3 | Consecutive reads before lockout |
+| `INVALID_POS_LOCKOUT_COUNT` | 5 | Consecutive invalid reads before lockout |
+
+### 19. Serial driver must validate pulse values before angle conversion
+
+- The MCU firmware returns **pulse = 0** when a servo doesn't respond on
+  the bus. The pulse-to-angle formula converts 0 to a mathematically valid
+  but physically meaningless value (e.g. 254° for servos 1-4). Without
+  validation, this passes through the ZMQ service retry logic (which only
+  checks for -1) and reaches the bridge as a "valid" reading, triggering
+  safety lockout or worse.
+- **2026-03-08 incident**: `arm_serial.py` `get_angles()` converted all
+  raw pulse values without validation (the original Rosmaster driver had
+  `if pulse > 0` guard). Servo 2 returned pulse=0 → angle 254° → bridge
+  flagged bad read → safety lockout after 5 consecutive reads.
+- The serial driver must apply **two-layer validation** before returning
+  an angle:
+  1. **Pulse range**: reject pulse ≤ 0 and pulse outside hardware-plausible
+     bounds (`_MIN_PULSE`, `_MAX_PULSE`).
+  2. **Angle range**: reject converted angle outside the servo's valid
+     range (`_ANGLE_RANGES`).
+- Invalid readings must return -1 (the error sentinel), so the ZMQ service
+  retry logic can detect and retry them.
+- When refactoring or replacing a driver, always cross-check the read path
+  against the original for safety guards that may look trivial but prevent
+  garbage data from propagating.
+
+---
+
+## Part F — Code review and testing discipline
+
+### 20. Simulation before real hardware — always
+
+- Every new trajectory, planner change, or controller configuration must be
+  tested in the Isaac Sim (or equivalent) environment first.
+- Never merge code that has only been tested on real hardware without a
+  corresponding simulation test that can be re-run in CI.
+
+### 21. Incremental deployment with reduced limits
+
+- When deploying new motion code to real hardware for the first time, use
+  reduced velocity limits (e.g. 25% of normal) and a constrained workspace.
+- Only increase limits after successful runs with an operator present and
+  e-stop in hand.
+
+### 22. Two-person rule for first-time real execution
+
+- The first real execution of any new trajectory or planner behavior should
+  have two people present: one operating the software, one with hand on the
+  hardware e-stop.
+- This rule can be relaxed for repeat runs of proven trajectories.
+
+---
+
+## Part G — Motion smoothness and efficiency tuning
+
+These rules were added after the 2026-03-08 smoothness audit that found the
+robot running at ~2% of servo capability with staircase velocity profiles.
+The full motion pipeline is:
+
+```
+MoveIt (vel_scale × joint_limits)
+  → joint_trajectory_controller (update_rate Hz, spline interpolation)
+    → JointStateTopicSystem (topic bridge)
+      → ZMQ bridge (state_publish_hz control loop)
+        → ZMQ → Orin serial → MCU firmware → servos (run_time interpolation)
+```
+
+Every layer must be tuned in concert; a bottleneck in any one layer
+degrades the entire chain.
+
+### 23. Servo `run_time` must exceed the command interval for overlap
+
+- The MCU firmware linearly interpolates each servo from current position to
+  target over `run_time` milliseconds. If `run_time ≈ command_interval`, the
+  servo completes each micro-move and briefly stops before the next command
+  — creating a staircase velocity profile (accelerate → decelerate → stop,
+  repeated for every waypoint).
+- **Best practice**: `run_time = 1.5× to 2.5× command_interval`. This keeps
+  the servo always mid-interpolation when the next target arrives, producing
+  continuous blended motion.
+- With the bridge control loop at 20 Hz (50 ms interval), `run_time` should
+  be **80–120 ms**. Current tuned value: **100 ms** (2× interval).
+- `run_time` is set in `lqtech_zmq_service.py` for both
+  `set_joint_position_array` and `set_joint_position_single`. Do not change
+  one without the other.
+
+| Bridge rate | Command interval | Recommended run_time |
+|---|---|---|
+| 20 Hz | 50 ms | 80–120 ms |
+| 25 Hz | 40 ms | 60–100 ms |
+| 30 Hz | 33 ms | 50–80 ms |
+
+### 24. Use open-loop control when servos have onboard PID
+
+- The x3plus bus servos have their own position PID controller. Closing the
+  loop again in ros2_control with stale feedback (bridge publishes at 20 Hz,
+  controller runs at 50 Hz) causes commanded-position ripple.
+- Set `open_loop_control: true` in `opus_x3plus_controllers.yaml` so the
+  `joint_trajectory_controller` uses its own last-commanded positions as
+  state, producing perfectly smooth spline-interpolated output.
+- The `joint_state_broadcaster` still publishes actual hardware state for
+  RViz and monitoring — only the JTC feedback loop is bypassed.
+- The bridge's deviation detection (Part E) remains the safety net for
+  physically stuck servos.
+
+### 25. Match rates across the pipeline or accept deliberate subsampling
+
+- `update_rate` (controller_manager) controls how often the JTC interpolates.
+- `state_publish_hz` (bridge) controls hardware command/read frequency.
+- If `update_rate > state_publish_hz`, the bridge subsamples the JTC output
+  (QoS depth=1 keeps only the latest command). This is acceptable when
+  `open_loop_control: true` because each subsampled position still lies on
+  the planned spline.
+- If `open_loop_control: false`, the rate mismatch causes stale-feedback
+  oscillation. In that case, `update_rate` **must** equal `state_publish_hz`.
+
+Current tuned values:
+
+| Parameter | Value | Where |
+|---|---|---|
+| `update_rate` | 50 Hz | `opus_x3plus_controllers.yaml` |
+| `state_publish_hz` | 20 Hz | bridge ROS param (serial bottleneck) |
+| `state_publish_rate` | 50 Hz | JTC param (monitoring, not motion) |
+| `open_loop_control` | true | `opus_x3plus_controllers.yaml` |
+
+### 26. MoveIt joint limits are the velocity/acceleration ceiling
+
+- `joint_limits.yaml` defines `max_velocity` and `max_acceleration` — these
+  are the **ceiling** that MoveIt's time parameterization respects.
+- The planner's `vel_scale` / `accel_scale` (0.0–1.0) multiply against this
+  ceiling to get the effective limit per motion.
+- Set the ceiling to the hardware's comfortable continuous capability, not
+  the servo's absolute maximum. For LX-16A class servos (~5.5 rad/s no-load),
+  a ceiling of **2.0 rad/s velocity / 2.0 rad/s² acceleration** provides
+  headroom while staying well within hardware limits.
+- **Exception: arm_joint5** (wrist roll) is lightly loaded (carries only the
+  gripper), so its ceiling is **4.0 rad/s / 4.0 rad/s²** — 2× the other
+  joints — for faster yaw rotation during pick-and-place.
+
+### 27. Planner velocity scaling must match the intended use case
+
+- `vel_scale` and `accel_scale` in `_plan_joint_target()` control how fast
+  each planned motion actually runs, as a fraction of the joint-limits ceiling.
+- Default values: **0.3 / 0.3** (general motions), **0.15 / 0.15** (go_home).
+- go_home is intentionally slower for safety — the arm may be far from home
+  and the path is not always predictable.
+- When adding new motion types, choose scaling deliberately:
+
+| Use case | vel_scale | accel_scale | Rationale |
+|---|---|---|---|
+| General planning | 0.3 | 0.3 | Smooth, perceptibly fast |
+| Homing / recovery | 0.15 | 0.15 | Cautious, predictable |
+| Precision placement | 0.1–0.2 | 0.1–0.2 | Accuracy over speed |
+| Fast transit (clear workspace) | 0.5–0.7 | 0.5–0.7 | Operator present, e-stop ready |
+
+- Never set `vel_scale > 0.7` without an explicit risk assessment and
+  operator present with hardware e-stop.
+
+### 28. Interpolation method must be "splines" (never "none")
+
+- The JTC `interpolation_method` parameter controls how positions between
+  waypoints are computed. `"splines"` (default) uses cubic or quintic spline
+  interpolation depending on whether velocity/acceleration data is provided.
+  `"none"` steps between waypoints with no smoothing.
+- Always set `interpolation_method: "splines"` explicitly in the controller
+  YAML to prevent regressions.
+- For best smoothness, MoveIt should generate trajectories with position,
+  velocity, and acceleration at each waypoint — this enables quintic spline
+  interpolation (acceleration-level continuity).
+
+---
+
+## Part H — BehaviorTree executor architecture
+
+Added 2026-03-09 after integrating BehaviorTree.CPP v4 as an alternative
+orchestration layer alongside the Python pick-place node. Validated on real
+hardware: 27/27 pick-and-place cycles passed (100%).
+
+### 29. BT package structure (`monty_bt`)
+
+The `monty_bt` package is a C++ ROS 2 package that provides:
+
+- **Three BT leaf node types** (headers in `include/monty_bt/`):
+  - `SetPlannerParams` — `RosServiceNode<SetParameters>`. Reads optional
+    input ports (`target_x/y/z`, `target_pitch`, `target_roll`, `target_grip`,
+    `execute`) and calls the planner's `set_parameters` service. Only sends
+    ports that are actually wired in the XML.
+  - `CallTriggerService` — `RosServiceNode<Trigger>`. Generic; the
+    `service_name` comes from the XML port. Returns SUCCESS/FAILURE based on
+    the Trigger response.
+  - `ComputeGraspParams` — `SyncActionNode` (pure math, no ROS). Converts
+    a block surface quaternion to `z_grasp`, `z_approach`, and `j5` (wrist
+    yaw). Rejects blocks tilted > 5° from horizontal.
+
+- **Three XML behavior trees** (`trees/`):
+  - `pick.xml` — 5-step pick: open gripper → move above → descend →
+    close gripper → ascend
+  - `place.xml` — 4-step place: move above → descend → open gripper → ascend
+  - `pick_and_place.xml` — Pick subtree → Place subtree (direct transit,
+    no intermediate go_home)
+
+- **Executor node** (`bt_pick_place_node.cpp`):
+  - Services: `~/run_pick`, `~/run_place`, `~/run_pick_and_place`
+    (all `std_srvs/Trigger`)
+  - Parameters: `block_x/y/z`, `block_qx/qy/qz/qw`, `place_x/y/z`,
+    `place_qx/qy/qz/qw`, `approach_height`, `grasp_depth`, `grip_open`,
+    `grip_closed`, `execute`, `dry_run`
+  - Each service call creates a fresh tree from file, populates the
+    blackboard from parameters, and ticks to completion.
+
+- **Test script** (`bt_pick_place_test.py`):
+  - Same candidate generation as `pick_place_test.py` (imported)
+  - Sets BT node parameters per cycle, calls `run_pick_and_place`,
+    then calls planner `go_home`
+  - Entry point: `bt_pick_place_test`
+
+### 30. BT node must use `shared_from_this()`, never non-owning shared_ptr
+
+- **2026-03-09 bug**: `RosNodeParams::nh` was set to
+  `std::shared_ptr<rclcpp::Node>(this, [](Node*){})` — a non-owning wrapper
+  with its own control block. BT.CPP v4 internally stores a `weak_ptr`;
+  when the tree was later created via `createTreeFromFile`, the
+  `weak_ptr::lock()` failed because the non-owning wrapper's control block
+  showed zero strong references.
+- **Error**: `"The ROS node went out of scope. RosNodeParams doesn't take
+  the ownership of the node."`
+- **Fix**: Two-phase init. The constructor only declares parameters and
+  resolves paths. A public `init()` method (called from `main()` after
+  `make_shared`) calls `shared_from_this()` for `RosNodeParams::nh`. This
+  returns the same shared_ptr that `main()` holds, keeping the node alive.
+- **Rule**: Never pass `this` to `RosNodeParams` in a constructor. Always
+  use `shared_from_this()` after the object is managed by a `shared_ptr`.
+
+### 31. SubTree nodes need `_autoremap="true"` for blackboard access
+
+- **2026-03-09 bug**: `pick_and_place.xml` used `<SubTree ID="Pick"/>` without
+  blackboard remapping. In BT.CPP v4, subtrees get their own empty blackboard
+  by default. `ComputeGraspParams` couldn't read `bz` → instant FAILURE on
+  every cycle (tree failed in ~50 ms, no planner services called).
+- **Fix**: `<SubTree ID="Pick" _autoremap="true"/>` shares all parent
+  blackboard entries with the subtree.
+- **Rule**: Always use `_autoremap="true"` on SubTree nodes unless you
+  deliberately want blackboard isolation with explicit port remapping.
+
+### 32. Service timeouts must accommodate MoveIt planning + execution
+
+- **2026-03-09 bug**: `server_timeout = 5000ms` in `RosNodeParams`. The
+  planner's trigger services (plan_position_orient, plan_straight_line,
+  go_home) block until MoveIt finishes planning + execution, which takes
+  5–20 seconds. The BT `RosServiceNode` returned `SERVICE_TIMEOUT` after 5s,
+  causing cascade failures: the test script's `go_home` raced with the
+  still-executing trajectory, crashing `move_group` with a segfault.
+- **Fix**: `server_timeout = 60000ms` (60 s), matching the Python test's
+  max timeout for straight-line moves.
+- **Rule**: `server_timeout` must cover the slowest planner operation. For
+  reference:
+
+| Service | Typical time | Worst case |
+|---|---|---|
+| `set_parameters` | < 10 ms | < 100 ms |
+| `set_gripper` | 0.3–0.8 s | 2 s |
+| `plan_position_orient` | 2–8 s | 15 s |
+| `plan_straight_line` | 3–15 s | 30 s |
+| `go_home` | 1–5 s | 15 s |
+
+### 33. Default parameters must be within the reachable workspace
+
+- **2026-03-09 bug**: Default `block_x = 0.2` was only 10.2 cm from the
+  arm pivot. At approach height (z = 0.055) with gripper-down (pitch = -π/2),
+  the analytical IK required q3 = ±105.6°, exceeding the ±90° joint limit.
+  Every `run_pick` call with defaults failed with "IK failed: pitch=-90.0°
+  not achievable."
+- **Fix**: Changed `block_x` default to `0.23` (13.2 cm from pivot, q3 ≈ 74°
+  with comfortable margin at both approach and grasp heights).
+- **Rule**: Always verify that default parameter values produce a reachable
+  IK solution for the intended operation. Test by calling the service with
+  no parameter overrides immediately after launch.
+
+### 34. BT blackboard must load place quaternion separately in pick_and_place mode
+
+- **2026-03-10 finding**: `populate_blackboard()` in `bt_pick_place_node.cpp`
+  loads `qx/qy/qz/qw` from `block_qx/qy/qz/qw` for `pick_and_place` mode.
+  The Place subtree in `pick_and_place.xml` reads the same `{qx}/{qy}/{qz}/{qw}`
+  entries, so it always uses the **block** quaternion — the `place_qx/qy/qz/qw`
+  node parameters are ignored.
+- Currently masked because `bt_pick_place_test.py` sends the same quaternion
+  (same yaw) for both pick and place. If different place orientations are ever
+  needed, the Place subtree will compute the wrong `j5_p`.
+- **Status**: known issue, not yet fixed.
+- **Fix when needed**: in `populate_blackboard()`, for `pick_and_place` mode,
+  write `place_qx/qy/qz/qw` to separate blackboard entries (e.g.
+  `place_qx/qy/qz/qw`) and update the Place subtree in `pick_and_place.xml`
+  to read from those entries instead of the shared `qx/qy/qz/qw`.
+
+### 35. Direct pick→place transit means no visible gripper rotation when yaw matches
+
+- In `pick_and_place.xml`, Pick and Place run in direct sequence with **no
+  intermediate go_home**. After Pick's ascend, the arm is already at the
+  target `j5` (yaw). The Place subtree's `plan_position_orient` targets the
+  same `j5_p` (because both use the same quaternion), so the gripper does
+  not visibly rotate during place.
+- If pick and place used **different yaw values**, the Place subtree's
+  `plan_position_orient` would produce a visible J5 rotation from the pick
+  yaw to the place yaw — even without an intermediate go_home.
+- If an intermediate go_home were added between Pick and Place, the arm
+  would reset to `j5 = 0` (home), and the Place `plan_position_orient`
+  would always produce a visible rotation to `j5_p`.
+- **Design choice**: direct transit is intentional (bug #5 in Part K below)
+  for cycle-time efficiency. Different place yaw is the correct way to
+  trigger visible rotation, not adding a go_home.
+
+---
+
+## Part I — Gripper geometry reference
+
+Physical layout of the X3plus gripper when facing straight down
+(pitch = -pi/2, the default pick-and-place orientation). These measurements
+are the ground truth for floor-clearance checks, base-collision AABBs, and
+grasp-depth constants throughout the codebase.
+
+### Vertical stack (top → bottom in world frame, gripper-down)
+
+1. **arm_link5 mesh** (forearm) — highest, entirely above the wrist origin
+2. **Grip mechanism roots** (grip_joint / llink_joint1 pivots) — 6.85 cm above wrist origin
+3. **Finger bar linkages** (rlink3 / llink3) — 5.05 cm above wrist origin
+4. **Finger joint pivots** (rlink_joint2 / llink_joint2) — 4.75 cm above wrist origin
+5. **arm_link5 origin** (wrist point) — the FK/IK target
+6. **Fingertips** (rlink2 / llink2 mesh tips) — **the LOWEST point**
+
+### Fingertip distance below wrist (from STL mesh bounding boxes)
+
+| Gripper angle | Fingertip below wrist | Description |
+|---|---|---|
+| grip_q = 0.00 | **1.20 cm** | Fully open |
+| grip_q = -0.30 | 1.05 cm | |
+| grip_q = -0.50 | 0.80 cm | |
+| grip_q = -0.77 | 0.31 cm | Init position |
+| grip_q = -1.00 | fingertips above wrist | Closing |
+| grip_q = -1.54 | fingertips above wrist | Fully closed |
+
+The rlink2/llink2 finger meshes extend **5.05 cm** from their joint origins
+(measured from STL bounding box, not the 4.2 cm estimated from inertial COM).
+
+### Floor collision rules
+
+- **FINGERTIP_BELOW_WRIST = 0.012 m** (worst case: fully open gripper)
+- Floor clearance = z_wrist − 0.012 m
+- For any target, verify: `z_wrist >= FINGERTIP_BELOW_WRIST + MIN_FLOOR_CLEARANCE`
+- The wrist (arm_link5 origin) is NOT the lowest point — always check fingertips.
+
+### Common mistake to avoid
+
+Do NOT conclude from URDF local-frame coordinates that "the gripper is above
+arm_link5" or that "arm_link5 is the lowest point." When the gripper faces down,
+arm_link5's Z-axis points toward the floor [0, 0, -1], which flips the mapping:
+local z = -0.0685 maps to +0.0685 in world Z (above wrist). The finger TIP meshes,
+however, extend downward past the wrist because they trace a long arc from the
+elevated pivot through and past the wrist level. Always verify against the actual
+mesh world-Z transform or the robot photos.
+
+---
+
+## Part J — Pick-and-place pipeline
+
+Validated on real hardware: **27/27 cycles passed (100%)**, full pick-place-home
+with yaw range [-86°, +178°], workspace X [0.200, 0.257] m, Y [-0.097, 0.063] m.
+Average cycle time 25.3 s.
+
+### Service architecture (three layers)
+
+```
+test script  →  pick_place orchestrator  →  planner services  →  controller / bridge
+(pick_place_test)  (x3plus_pick_place)     (x3plus_5dof_planner)   (FJT + ZMQ)
+```
+
+| Layer | Responsibility | Safety gate |
+|---|---|---|
+| Test script | Generates poses, drives pick/place/home cycle, reports results | Sets `dry_run` on planner as first action |
+| Orchestrator | Sequences gripper + move + descend + ascend steps, validates poses | `_resolve_execute()` applies `dry_run` override |
+| Planner | IK, workspace checks, MoveIt/FJT execution, virtual state tracking | `_apply_dry_run()` + `_is_dry_run` gate in `_execute_fjt` |
+
+**Key principle**: each layer independently refuses execution when `dry_run=True`.
+The test script doesn't trust the orchestrator; the orchestrator doesn't trust the
+planner. This defense-in-depth prevented accidental execution during development.
+
+### Analytical IK for 5-DOF gripper-down pick-and-place
+
+The arm has 5 joints but pick-and-place only needs 4 DOF (x, y, z, yaw).
+Pitch is fixed at `-pi/2` (straight down). This makes analytical IK reliable:
+
+- **q1** = `-atan2(y, x - BASE_XY)` (azimuth from joint-1 pivot)
+- **q2, q3** = 2R sub-problem in the arm's vertical plane (two solutions: elbow-up/down)
+- **q4** = `phi - q2 - q3` where `phi = pitch - pi/2`
+- **q5** = yaw (maps directly from block orientation)
+
+The `L3X = 0.00215 m` perpendicular offset in the wrist joint is critical — omitting
+it causes ~2 mm position error at the wrist, which accumulates to missed grasps.
+
+**Cube symmetry for yaw mapping** — A cube looks the same at yaw and yaw ± pi.
+`map_yaw_to_j5()` exploits this: try the raw yaw, then yaw - pi, then yaw + pi,
+accepting the first that fits J5 range [-pi/2, pi]. This doubles the effective
+yaw coverage.
+
+**Elbow-flip avoidance** — `analytical_ik_5d_all()` returns ALL valid solutions.
+The straight-line planner picks the one closest (L2 norm in joint space) to the
+previous waypoint, preventing elbow configuration flips that caused jerky motion
+in early tests.
+
+### Workspace validation layers (defense-in-depth)
+
+Every target is validated by **five independent checks** before execution:
+
+1. **Bounding box** (`is_in_workspace`): dx >= 0, radial reach, height limits
+2. **Base collision AABB** (`is_safe_from_base_collision`): chassis + tracks
+   modeled as padded AABB, with grip-angle-dependent fingertip extent
+3. **Floor clearance**: `z_wrist - FINGERTIP_BELOW_WRIST >= MIN_FLOOR_CLEARANCE`
+   (see Part I — Gripper geometry)
+4. **Analytical IK**: must succeed at both grasp height AND approach height
+5. **Descent path validation**: IK checked at every 1 cm waypoint along the
+   vertical descent (not just endpoints)
+
+The test script adds a **sixth layer**: frontal workspace bounds (`FRONTAL_Y_MAX
+= 0.10 m`, `FRONTAL_X_MIN = 0.12 m`) to keep test points in the safe zone in
+front of the robot.
+
+**Why descent path validation matters** — Early tests had IK failures mid-descent
+where the elbow hit a joint limit at an intermediate height even though start and
+end were reachable. Checking every 1 cm waypoint eliminated this class of failure.
+
+### Tuned constants (validated at 100% success)
+
+**Pick-and-place geometry**
+
+| Constant | Value | Rationale |
+|---|---|---|
+| `PITCH_DOWN` | -pi/2 | Gripper faces straight down |
+| `FINGERTIP_BELOW_WRIST` | 0.012 m | Worst case (fully open), from STL meshes |
+| `MIN_FLOOR_CLEARANCE` | 0.005 m | 5 mm safety margin above floor |
+| `BLOCK_HEIGHT` | 0.03 m | 3 cm cube |
+| `GRASP_DEPTH` | 0.015 m | Wrist descends 1.5 cm below block surface |
+| `APPROACH_HEIGHT` | 0.04 m | 4 cm clearance above grasp height |
+| `GRIP_OPEN` | 0.0 rad | Fully open |
+| `GRIP_CLOSED` | -1.3 rad | Closed on 3 cm block (not fully closed at -1.54) |
+
+**Planner velocity/acceleration**
+
+| Parameter | Value | Context |
+|---|---|---|
+| `vel_scale` / `accel_scale` | 0.3 / 0.3 | General motions (pick/place moves) |
+| `vel_scale` / `accel_scale` | 0.15 / 0.15 | go_home (cautious, path less predictable) |
+| `_MAX_JOINT_VEL` | 0.4 rad/s | Straight-line per-segment velocity cap |
+| `cartesian_speed` | 0.03 m/s | Straight-line Cartesian speed |
+| `cartesian_step` | 0.01 m | 1 cm waypoint spacing |
+
+**Base collision zone**
+
+| Constant | Value | Origin |
+|---|---|---|
+| `_BASE_COLL_X` | (-0.13, 0.07) m | Chassis longitudinal extent |
+| `_BASE_COLL_Y_HALF` | 0.15 m | Half-width including tracks |
+| `_BASE_COLL_Z_TOP` | 0.13 m | Top of base assembly |
+| `_GRIPPER_COLL_PAD` | 0.025 m | Gripper lateral extent + safety |
+
+**URDF collision bodies** — The URDF includes collision-only box links for left
+and right tracks (`right_track_link`, `left_track_link`): `0.28 x 0.06 x 0.08 m`
+at `y = ±0.13 m` from base_link center. The SRDF intentionally does NOT disable
+collisions between these track links and arm_link2-5 or gripper links, so MoveIt
+rejects plans that would hit the tracks. This dual approach (software AABB in
+planner + MoveIt collision meshes in URDF/SRDF) provides defense-in-depth.
+
+### Virtual state tracking
+
+The planner maintains `_virtual_arm_positions` and `_virtual_grip_position`
+that are updated after every successful plan or execution:
+
+- **Dry-run chaining**: sequential dry-run calls see the expected end-state
+  of the previous plan, so the full sequence can be validated without moving.
+- **Post-execution continuity**: after FJT execution, the planner knows
+  where the arm ended up without waiting for the next hardware state message,
+  preventing race conditions in rapid service calls.
+
+Virtual state is reset to `None` before execution (forcing hardware state),
+and set to the trajectory endpoint after success.
+
+### Test methodology (configuration-space sampling)
+
+The test generates candidate poses by **sampling in joint configuration space**
+rather than Cartesian space:
+
+1. Random `q2, q3` within joint limits
+2. Compute `q4 = -pi - q2 - q3` (gripper-down constraint)
+3. Reject if `q4` violates limits
+4. Forward kinematics to get wrist position
+5. Accept only if wrist height matches grasp height (±2 cm)
+6. Full reachability check (all 5 layers) on both pick and place positions
+7. Minimum distance filter (1.5 cm) to avoid clustering
+
+This naturally produces only poses the arm can actually reach with gripper
+down, avoiding the sparse-hit problem of uniform Cartesian sampling in a
+small, irregularly-shaped workspace.
+
+**Reproducibility** — Seed-based RNG (`numpy.random.default_rng(seed=42)`)
+ensures the same test poses are generated every run. Results are saved to JSON
+with full metadata (timestamp, pass/fail per cycle, failure reasons) and a PNG
+visualization.
+
+### MoveIt configuration that works
+
+| Setting | Value | Why |
+|---|---|---|
+| `open_loop_control` | true | Avoids stale-feedback oscillation from 20 Hz bridge |
+| `interpolation_method` | "splines" | Smooth cubic/quintic interpolation between waypoints |
+| `update_rate` | 50 Hz | Controller interpolation rate |
+| `state_publish_hz` (bridge) | 20 Hz | Serial bus bottleneck; subsampling is OK with open-loop |
+| `planner_id` | "RRTConnect" | Fast, reliable for joint-space goals |
+| `num_planning_attempts` | 10 | Retry up to 10 times |
+| `allowed_planning_time` | 2.0 s | Per attempt |
+| Fingertip link padding | 0.015 m | Extra padding on rlink2/llink2 (the finger tips) |
+
+### Common failure modes that were eliminated
+
+| Failure mode | Root cause | Fix |
+|---|---|---|
+| IK fail mid-descent | Intermediate heights hit joint limits | Validate every 1 cm waypoint |
+| Elbow flip during straight line | Multiple IK solutions, random selection | `analytical_ik_5d_all` + nearest-to-previous |
+| Track/tire collision | MoveIt didn't know about tracks | Added collision boxes to URDF + SRDF |
+| Base collision at low Z | Software check only at endpoints | AABB check + grip-angle-aware fingertip model |
+| Yaw out of J5 range | Block yaw beyond [-90°, 180°] | Cube symmetry: try yaw ± pi |
+| Trajectory too slow | Single slow segment stretched entire path | Per-segment velocity limiting |
+| Stale feedback oscillation | Closed-loop JTC with 20 Hz bridge | `open_loop_control: true` |
+| Servo jitter on startup | Bridge deviation lockout during homing | `STARTUP_GRACE_SEC = 8.0` |
+
+---
+
+## Part K — Resolved bugs reference
+
+Quick-reference table of all bugs found and fixed during development.
+Each entry links to the rule that now prevents recurrence.
+
+| # | Symptom | Root cause | Fix | Rule |
+|---|---|---|---|---|
+| 1 | `"The ROS node went out of scope"` on every `createTreeFromFile` | Non-owning `shared_ptr(this, no-op-deleter)` creates separate control block; BT.CPP's internal `weak_ptr` expires | Two-phase init: `shared_from_this()` in `init()` called after `make_shared` | 30 |
+| 2 | `"IK failed: pitch=-90.0°"` with default params | Default `block_x=0.2` too close to arm pivot; q3 needs ±105° but limit is ±90° | Changed default to `0.23`; q3 ≈ 74° | 33 |
+| 3 | Every cycle fails in ~50 ms, no planner services called | `<SubTree>` without `_autoremap="true"` gives subtree an empty blackboard; `ComputeGraspParams` can't read inputs | Added `_autoremap="true"` to both SubTree nodes in `pick_and_place.xml` | 31 |
+| 4 | `SERVICE_TIMEOUT` after 5 s; `move_group` segfault | `server_timeout=5000ms` too short for MoveIt planning + execution; timeout causes race with subsequent go_home | Increased `server_timeout` to `60000ms` | 32 |
+| 5 | BT pick-and-place slower than Python version | Unnecessary `go_home` transit between Pick and Place subtrees | Removed intermediate `go_home`; direct transit from pick-ascend to place-approach | 29 |
+| 6 | Joint 5 (wrist roll) visibly slow during yaw rotation | Same 2.0 rad/s velocity ceiling as load-bearing joints 1–4 | Increased arm_joint5 to 4.0 rad/s / 4.0 rad/s² in `joint_limits.yaml` | 26 |
+| 7 | Gripper never rotates during BT place step | Direct Pick→Place transit (no go_home) + same yaw for pick and place = j5 unchanged; also `populate_blackboard` ignores `place_qx/qy/qz/qw` in `pick_and_place` mode | **Not yet fixed** — use different place yaw to trigger rotation; fix blackboard quaternion loading when distinct place orientation is needed | 34, 35 |
