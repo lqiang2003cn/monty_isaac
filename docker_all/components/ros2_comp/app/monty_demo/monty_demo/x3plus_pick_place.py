@@ -37,6 +37,7 @@ from monty_demo.opus_plan_and_imp.log_utils import LOG_DIR, make_file_logger
 from monty_demo.x3plus_5dof_planner import (
     analytical_ik_5d,
     is_in_workspace,
+    is_safe_from_base_collision,
     JOINT_LIMITS,
     BASE_XY,
 )
@@ -114,10 +115,14 @@ def parse_block_pose(bx, by, bz, qx, qy, qz, qw):
     return j5, "ok"
 
 
-def is_reachable(x, y, z_wrist, roll, approach_height=APPROACH_HEIGHT):
-    """Check if a gripper-down target is reachable and floor-safe.
+def is_reachable(x, y, z_wrist, roll, approach_height=APPROACH_HEIGHT,
+                 grip_q=0.0):
+    """Check if a gripper-down target is reachable, floor-safe, and base-safe.
 
     Returns (True, "") or (False, reason).
+    grip_q defaults to 0.0 (open) for worst-case base collision checking.
+    Validates intermediate waypoints along the vertical descent to ensure
+    the full straight-line path is feasible.
     """
     z_fingertip = z_wrist - FINGERTIP_BELOW_WRIST
     if z_fingertip < MIN_FLOOR_CLEARANCE:
@@ -141,6 +146,12 @@ def is_reachable(x, y, z_wrist, roll, approach_height=APPROACH_HEIGHT):
             f"Wrist ({x:.3f},{y:.3f},{z_wrist:.3f}) outside workspace"
         )
 
+    if not is_safe_from_base_collision(x, y, z_wrist, grip_q):
+        return False, (
+            f"Base collision: wrist ({x:.3f},{y:.3f},{z_wrist:.3f}) "
+            "too close to chassis/wheels"
+        )
+
     ik = analytical_ik_5d(x, y, z_wrist, PITCH_DOWN, roll)
     if ik is None:
         return False, (
@@ -153,11 +164,28 @@ def is_reachable(x, y, z_wrist, roll, approach_height=APPROACH_HEIGHT):
             f"Approach ({x:.3f},{y:.3f},{z_approach:.3f}) outside workspace"
         )
 
+    if not is_safe_from_base_collision(x, y, z_approach, grip_q):
+        return False, (
+            f"Base collision at approach: ({x:.3f},{y:.3f},{z_approach:.3f}) "
+            "too close to chassis/wheels"
+        )
+
     ik_a = analytical_ik_5d(x, y, z_approach, PITCH_DOWN, roll)
     if ik_a is None:
         return False, (
             f"IK failed at approach height z={z_approach:.4f}"
         )
+
+    cartesian_step = 0.01
+    n_pts = max(2, int(math.ceil(approach_height / cartesian_step)) + 1)
+    for i in range(1, n_pts - 1):
+        t = i / (n_pts - 1)
+        z_mid = z_approach + t * (z_wrist - z_approach)
+        if analytical_ik_5d(x, y, z_mid, PITCH_DOWN, roll) is None:
+            return False, (
+                f"IK failed at descent height z={z_mid:.4f}, "
+                f"roll={math.degrees(roll):.1f}°"
+            )
 
     return True, ""
 

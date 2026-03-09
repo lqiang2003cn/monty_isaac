@@ -150,4 +150,34 @@
     <disable_collisions link1="mono_link" link2="llink2" reason="Never"/>
     <disable_collisions link1="mono_link" link2="llink3" reason="Never"/>
 
+    <!-- ═══ Track/Tire Collision Links ═══
+         Collision-only boxes modeling the left and right tracks/tires.
+         Collisions ENABLED between tracks and: arm_link2–5, all gripper links.
+         Only disable pairs that are fixed, overlapping, or geometrically impossible. -->
+
+    <!-- Tracks vs base structure (fixed / overlapping) -->
+    <disable_collisions link1="base_link" link2="right_track_link" reason="Fixed"/>
+    <disable_collisions link1="base_link" link2="left_track_link" reason="Fixed"/>
+    <disable_collisions link1="base_footprint" link2="right_track_link" reason="Fixed"/>
+    <disable_collisions link1="base_footprint" link2="left_track_link" reason="Fixed"/>
+    <disable_collisions link1="right_track_link" link2="left_track_link" reason="Never"/>
+
+    <!-- arm_link1 is directly above the base — cannot reach track level -->
+    <disable_collisions link1="arm_link1" link2="right_track_link" reason="Never"/>
+    <disable_collisions link1="arm_link1" link2="left_track_link" reason="Never"/>
+
+    <!-- Sensors are fixed to the base, far from track level -->
+    <disable_collisions link1="camera_link" link2="right_track_link" reason="Never"/>
+    <disable_collisions link1="camera_link" link2="left_track_link" reason="Never"/>
+    <disable_collisions link1="laser_link" link2="right_track_link" reason="Never"/>
+    <disable_collisions link1="laser_link" link2="left_track_link" reason="Never"/>
+    <disable_collisions link1="imu_link" link2="right_track_link" reason="Never"/>
+    <disable_collisions link1="imu_link" link2="left_track_link" reason="Never"/>
+    <disable_collisions link1="mono_link" link2="right_track_link" reason="Never"/>
+    <disable_collisions link1="mono_link" link2="left_track_link" reason="Never"/>
+
+    <!-- NOTE: arm_link2–5 and all gripper links (rlink*, llink*) vs tracks
+         are intentionally NOT disabled — MoveIt must check these pairs to
+         prevent the arm/gripper from colliding with the tires/tracks. -->
+
 </robot>

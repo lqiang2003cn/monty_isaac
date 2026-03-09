@@ -31,6 +31,20 @@ Here is my vision:
 # verbose: enable ROS debug-level console logs for bridge + planner
 DEBUG_LOGS=true ./scripts/real_up.sh
 
+
+# ----------------------- test pickup ----------------------------#
+# Quick dry-run test (plans only, arm does NOT move — sets dry_run lockout on planner)
+docker compose exec ros2_comp bash -l -c "ros2 run monty_demo pick_place_test --dry-run -n 5"
+# Check planner debug log after any test:
+cat docker_all/logs/x3plus_planner.log
+
+# Generate & visualize candidate poses only (no robot needed)
+docker compose exec ros2_comp bash -l -c "ros2 run monty_demo pick_place_test --generate-only"
+
+# Full 100-point live test
+docker compose exec ros2_comp bash -l -c "ros2 run monty_demo pick_place_test -n 100"
+
+
 # ----------------------- move in joint space -----------------------
 # dry-run: plan all 100 motions, arm does NOT move (safe first check)
 docker compose exec ros2_comp bash -l -c "ros2 run monty_demo x3plus_reachability_test --dry-run"
@@ -59,24 +73,11 @@ docker compose exec ros2_comp bash -l -c "ros2 run monty_demo straight_line_test
 docker compose exec ros2_comp bash -l -c "ros2 run monty_demo straight_line_test -n 5"
 
 
-# ----------------------- test pickup ----------------------------#
-# Quick dry-run test (plans only, arm does NOT move — sets dry_run lockout on planner)
-docker compose exec ros2_comp bash -l -c "ros2 run monty_demo pick_place_test --dry-run -n 5"
-# Check planner debug log after any test:
-cat docker_all/logs/x3plus_planner.log
 
-# Generate & visualize candidate poses only (no robot needed)
-docker compose exec ros2_comp bash -l -c "ros2 run monty_demo pick_place_test --generate-only"
-
-# Full 100-point live test
-docker compose exec ros2_comp bash -l -c "ros2 run monty_demo pick_place_test -n 100"
-
+########################################################################
 ################## isaac sim ##################
 # start all (isaac + ros2_comp + MoveIt + planner, auto go_home)
 ./scripts/sim_up.sh
-########################################################################
-
-
 
 ################## old ##################
 # run with profile

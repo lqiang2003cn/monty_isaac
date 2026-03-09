@@ -62,6 +62,12 @@ GRIP_OPEN = 0.0
 GRIP_CLOSED = -1.3
 PLACE_Y_OFFSET = 0.03
 
+# Frontal workspace bounds — only sample points in front of the base.
+# Prevents the arm from reaching to the sides where tires/tracks are.
+FRONTAL_Y_MAX = 0.10     # ±10 cm from arm centerline
+FRONTAL_X_MIN = 0.12     # at least 12 cm forward of base_link origin
+Q1_SAMPLE_LIMIT = 1.047  # ±60° joint1 range for candidate sampling
+
 PLANNER_NODE = "/x3plus_5dof_planner"
 
 # ---------------------------------------------------------------------------
@@ -138,20 +144,43 @@ def forward_kin(qs):
 
 
 from monty_demo.opus_plan_and_imp.opus_joint_config import INIT_ARM_POSITIONS
+from monty_demo.x3plus_5dof_planner import is_safe_from_base_collision
+
 HOME_JOINTS = list(INIT_ARM_POSITIONS)
 HOME_XYZ = forward_kin(HOME_JOINTS)
 
 
 def _is_reachable_offline(x, y, z_wrist, roll, approach_height=APPROACH_HEIGHT):
-    """Offline reachability check (no ROS)."""
+    """Offline reachability check (no ROS).
+
+    Uses worst-case gripper (open, grip_q=0.0) for base collision checking.
+    Enforces frontal workspace bounds to keep the arm in front of the base.
+    Validates intermediate waypoints along the vertical descent to match what
+    the planner's straight-line path will actually encounter.
+    """
+    if abs(y) > FRONTAL_Y_MAX:
+        return False, "outside frontal workspace (y)"
+    if x < FRONTAL_X_MIN:
+        return False, "outside frontal workspace (x)"
     z_fingertip = z_wrist - FINGERTIP_BELOW_WRIST
     if z_fingertip < MIN_FLOOR_CLEARANCE:
         return False, "floor collision"
+    if not is_safe_from_base_collision(x, y, z_wrist, grip_q=0.0):
+        return False, "base collision at grasp"
     if analytical_ik(x, y, z_wrist, PITCH_DOWN, roll) is None:
         return False, "IK fail at grasp"
     z_app = z_wrist + approach_height
+    if not is_safe_from_base_collision(x, y, z_app, grip_q=0.0):
+        return False, "base collision at approach"
     if analytical_ik(x, y, z_app, PITCH_DOWN, roll) is None:
         return False, "IK fail at approach"
+    cartesian_step = 0.01
+    n_pts = max(2, int(math.ceil(approach_height / cartesian_step)) + 1)
+    for i in range(1, n_pts - 1):
+        t = i / (n_pts - 1)
+        z_mid = z_app + t * (z_wrist - z_app)
+        if analytical_ik(x, y, z_mid, PITCH_DOWN, roll) is None:
+            return False, f"IK fail at descent z={z_mid:.4f}"
     return True, ""
 
 
@@ -183,7 +212,7 @@ def generate_candidates(n=100, seed=42, min_dist=0.015):
         if abs(q4) > JOINT_LIMITS[3][1] + 1e-6:
             continue
 
-        q1 = float(rng.uniform(*JOINT_LIMITS[0]))
+        q1 = float(rng.uniform(-Q1_SAMPLE_LIMIT, Q1_SAMPLE_LIMIT))
         yaw = float(rng.uniform(J5_LO, J5_HI))
 
         qs = [q1, q2, q3, q4, yaw]

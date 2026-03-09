@@ -82,11 +82,18 @@ def generate_launch_description():
     ompl_yaml = _load_yaml(os.path.join(config_dir, "ompl_planning.yaml"))
 
     # ── Assemble all move_group parameters ──
+    planning_config = dict(joint_limits_yaml)
+    planning_config["default_robot_padding"] = 0.01
+    planning_config["default_robot_link_padding"] = {
+        "rlink2": 0.015,
+        "llink2": 0.015,
+    }
+
     all_params = {
         "robot_description": robot_description_urdf_only,
         "robot_description_semantic": srdf_content,
         "robot_description_kinematics": kinematics_yaml,
-        "robot_description_planning": joint_limits_yaml,
+        "robot_description_planning": planning_config,
         "use_sim_time": False,
         "planning_pipelines": ["ompl"],
         "default_planning_pipeline": "ompl",

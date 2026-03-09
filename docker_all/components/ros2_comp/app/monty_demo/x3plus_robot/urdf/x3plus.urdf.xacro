@@ -522,6 +522,49 @@
         <child link="mono_link"/>
     </joint>
 
+    <!-- Tire/track collision volumes (collision-only, no visual).
+         Box dimensions are conservative estimates of the X3plus tracks
+         derived from: _BASE_COLL_Y_HALF=0.15, _BASE_COLL_X=(-0.13,0.07)
+         in x3plus_5dof_planner.py, padded for safety.
+         In base_link frame: ground is at z=-0.076, base bottom at z~0. -->
+    <link name="right_track_link">
+        <inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <mass value="0.01"/>
+            <inertia ixx="1e-6" ixy="0" ixz="0" iyy="1e-6" iyz="0" izz="1e-6"/>
+        </inertial>
+        <collision>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.28 0.06 0.08"/>
+            </geometry>
+        </collision>
+    </link>
+    <joint name="right_track_joint" type="fixed">
+        <origin xyz="-0.02 -0.13 -0.038" rpy="0 0 0"/>
+        <parent link="base_link"/>
+        <child link="right_track_link"/>
+    </joint>
+
+    <link name="left_track_link">
+        <inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <mass value="0.01"/>
+            <inertia ixx="1e-6" ixy="0" ixz="0" iyy="1e-6" iyz="0" izz="1e-6"/>
+        </inertial>
+        <collision>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.28 0.06 0.08"/>
+            </geometry>
+        </collision>
+    </link>
+    <joint name="left_track_joint" type="fixed">
+        <origin xyz="-0.02 0.13 -0.038" rpy="0 0 0"/>
+        <parent link="base_link"/>
+        <child link="left_track_link"/>
+    </joint>
+
     <xacro:if value="${include_ros2_control}">
         <xacro:include filename="ros2_control_topic.xacro"/>
     </xacro:if>

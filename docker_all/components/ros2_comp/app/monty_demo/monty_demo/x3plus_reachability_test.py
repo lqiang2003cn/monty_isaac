@@ -58,6 +58,8 @@ PLANNER_NODE = "/x3plus_5dof_planner"
 
 _MAX_REACH = L1 + L2 + L3 + L3X
 
+from monty_demo.x3plus_5dof_planner import is_safe_from_base_collision
+
 
 def is_in_workspace(x: float, y: float, z: float, margin: float = 0.01) -> bool:
     dx = x - BASE_XY
@@ -211,6 +213,9 @@ def generate_test_points(n=100, seed=42, min_dist=0.018):
             continue
 
         if not is_in_workspace(x, y, z):
+            continue
+
+        if not is_safe_from_base_collision(x, y, z):
             continue
 
         pitch = _best_pitch(x, y, z)

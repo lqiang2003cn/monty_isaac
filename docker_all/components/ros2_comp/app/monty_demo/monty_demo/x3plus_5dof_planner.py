@@ -113,6 +113,55 @@ def is_in_workspace(x: float, y: float, z: float, margin: float = 0.01) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Base / wheel collision exclusion zone
+# ---------------------------------------------------------------------------
+# The X3plus chassis + wheels/tracks create a collision volume that the
+# gripper must avoid.  Modeled as a conservative axis-aligned bounding box
+# in the world frame (base_footprint at floor level).
+#
+# Derived from: URDF joint origins, X3plus platform dimensions (~23×27 cm
+# with tracks), and the 2026-03-08 tire-collision incident at test 20.
+# The arm pivot (arm_joint1) sits at (0.098, 0, 0.178) in world frame,
+# near the front edge of the chassis.
+
+_BASE_COLL_X = (-0.13, 0.07)   # longitudinal extent of base (world x)
+_BASE_COLL_Y_HALF = 0.15       # half-width including wheels/tracks
+_BASE_COLL_Z_TOP = 0.13        # top of base assembly (world z)
+_GRIPPER_COLL_PAD = 0.025      # gripper lateral extent + safety margin
+FINGERTIP_BELOW_WRIST = 0.012  # worst case, fully open (from STL meshes)
+
+
+def is_safe_from_base_collision(x: float, y: float, z_wrist: float,
+                                grip_q: float = 0.0) -> bool:
+    """Return True if the gripper at this wrist position avoids the base.
+
+    Models the chassis + wheels as a padded AABB and checks whether the
+    gripper volume (wrist ± finger extent) overlaps it.  Finger extent
+    below the wrist depends on the grip_joint angle (see the
+    x3plus-gripper-geometry cursor rule for the lookup table).
+    """
+    if grip_q >= -0.5:
+        ftip_below = 0.012   # open / near-open
+    elif grip_q >= -0.77:
+        ftip_below = 0.005   # init position
+    else:
+        ftip_below = 0.0     # closed — fingertips above wrist
+
+    z_lowest = z_wrist - ftip_below
+
+    if z_lowest > _BASE_COLL_Z_TOP:
+        return True
+
+    x_min, x_max = _BASE_COLL_X
+    pad = _GRIPPER_COLL_PAD
+    if (x_min - pad < x < x_max + pad
+            and abs(y) < _BASE_COLL_Y_HALF + pad):
+        return False
+
+    return True
+
+
+# ---------------------------------------------------------------------------
 # Analytical IK for the 5-DOF arm
 # ---------------------------------------------------------------------------
 
@@ -423,6 +472,13 @@ class X3plus5DofPlanner(Node):
             return False
         return execute
 
+    @property
+    def _grip_q(self):
+        """Current grip_joint position (virtual if set, else hardware)."""
+        if self._virtual_grip_position is not None:
+            return self._virtual_grip_position
+        return self._current_grip_position
+
     def _plan_position_cb(self, request, response):
         """Plan to (x, y, z) with orientation free."""
         x = self.get_parameter("target_x").value
@@ -442,6 +498,14 @@ class X3plus5DofPlanner(Node):
             self._flog.debug(f"plan_position: REJECTED — outside workspace")
             response.success = False
             response.message = f"Target ({x:.3f},{y:.3f},{z:.3f}) is outside workspace"
+            return response
+
+        if not is_safe_from_base_collision(x, y, z, self._grip_q):
+            self._flog.debug(f"plan_position: REJECTED — base/wheel collision")
+            response.success = False
+            response.message = (
+                f"Target ({x:.3f},{y:.3f},{z:.3f}) too close to base/wheels"
+            )
             return response
 
         pitch = _best_pitch_for_position(x, y, z)
@@ -492,6 +556,14 @@ class X3plus5DofPlanner(Node):
             response.message = f"Target ({x:.3f},{y:.3f},{z:.3f}) is outside workspace"
             return response
 
+        if not is_safe_from_base_collision(x, y, z, self._grip_q):
+            self._flog.debug(f"plan_position_orient: REJECTED — base/wheel collision")
+            response.success = False
+            response.message = (
+                f"Target ({x:.3f},{y:.3f},{z:.3f}) too close to base/wheels"
+            )
+            return response
+
         joints = analytical_ik_5d(x, y, z, pitch, roll)
         if joints is None:
             self._flog.debug(
@@ -537,6 +609,13 @@ class X3plus5DofPlanner(Node):
         if not is_in_workspace(x, y, z):
             response.success = False
             response.message = f"Target ({x:.3f},{y:.3f},{z:.3f}) is outside workspace"
+            return response
+
+        if not is_safe_from_base_collision(x, y, z, self._grip_q):
+            response.success = False
+            response.message = (
+                f"Target ({x:.3f},{y:.3f},{z:.3f}) too close to base/wheels"
+            )
             return response
 
         roll_d, pitch_d, yaw_d = _quaternion_to_rpy(qx, qy, qz, qw)
@@ -739,6 +818,22 @@ class X3plus5DofPlanner(Node):
             )
             return response
 
+        grip = self._grip_q
+        if not is_safe_from_base_collision(target_x, target_y, target_z, grip):
+            self._flog.debug("plan_straight_line: REJECTED — target in base collision zone")
+            response.success = False
+            response.message = (
+                f"Target ({target_x:.3f},{target_y:.3f},{target_z:.3f}) "
+                "too close to base/wheels"
+            )
+            return response
+
+        if not is_safe_from_base_collision(cur_x, cur_y, cur_z, grip):
+            self._flog.warning(
+                f"plan_straight_line: current position ({cur_x:.3f},{cur_y:.3f},"
+                f"{cur_z:.3f}) is inside base collision zone!"
+            )
+
         target_joints = analytical_ik_5d(
             target_x, target_y, target_z, cur_pitch, cur_roll,
         )
@@ -791,7 +886,6 @@ class X3plus5DofPlanner(Node):
         # --- Phase 2: Generate and validate full path ---
         # Pitch is interpolated smoothly from cur_pitch to target_pitch so the
         # gripper orientation transitions gradually (no mid-path jumps).
-        grip = self._current_grip_position
         waypoint_positions = [list(q) + [grip]]
 
         n_flips_avoided = 0
@@ -801,6 +895,18 @@ class X3plus5DofPlanner(Node):
             wy = cur_y + t * dy
             wz = cur_z + t * dz
             wp_pitch = cur_pitch + t * (target_pitch - cur_pitch)
+
+            if not is_safe_from_base_collision(wx, wy, wz, grip):
+                self._flog.debug(
+                    f"plan_straight_line: base collision at waypoint "
+                    f"{i}/{n_points-1} ({wx:.3f},{wy:.3f},{wz:.3f})"
+                )
+                response.success = False
+                response.message = (
+                    f"Straight-line path infeasible: base collision at waypoint "
+                    f"{i}/{n_points - 1} ({wx:.3f}, {wy:.3f}, {wz:.3f})"
+                )
+                return response
 
             solutions = analytical_ik_5d_all(wx, wy, wz, wp_pitch, cur_roll)
             if not solutions:
@@ -1128,7 +1234,19 @@ class X3plus5DofPlanner(Node):
             f"plan_only={not execute}"
         )
 
-        req.start_state.is_diff = True
+        grip_pos = (self._virtual_grip_position
+                    if self._virtual_grip_position is not None
+                    else self._current_grip_position)
+        if not execute:
+            start_js = JointState()
+            start_js.name = ["grip_joint"]
+            start_js.position = [float(grip_pos)]
+            req.start_state.joint_state = start_js
+            req.start_state.is_diff = True
+        self._flog.debug(
+            f"_plan_joint_target: grip_joint={grip_pos:.4f} "
+            f"{'set in MoveIt start state' if not execute else '(execution uses robot state)'}"
+        )
 
         req.workspace_parameters.header.frame_id = PLANNING_FRAME
         req.workspace_parameters.min_corner.x = -1.0
@@ -1187,7 +1305,7 @@ class X3plus5DofPlanner(Node):
         error_code = result.result.error_code.val
         if error_code == 1:  # MoveItErrorCodes.SUCCESS
             self._virtual_arm_positions = list(joint_values[:5])
-            self._virtual_grip_position = 0.0
+            self._virtual_grip_position = grip_pos
             action = "executed" if execute else "planned"
             self._flog.info(
                 f"MoveIt: motion {action} successfully "

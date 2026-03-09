@@ -409,11 +409,32 @@ class OpusX3PlusZMQBridge(Node):
                     worst_jump = jump
                     worst_idx = i
             if worst_jump > MAX_PLAUSIBLE_JUMP_DEG:
-                reject_reason = (
-                    "implausible %.1f° jump on %s (hw=%.1f°, prev=%.1f°)"
-                    % (worst_jump, SERVO_ORDER[worst_idx],
-                       degs[worst_idx], self._last_good_hw_deg[worst_idx])
-                )
+                # When the control loop is blocked by a serial read timeout,
+                # servos continue moving toward the last commanded position.
+                # A large jump from the last-good reading is legitimate if
+                # the new reading is close to where we told the servo to go.
+                near_cmd = False
+                if self._last_cmd_deg is not None:
+                    near_cmd = True
+                    for i in range(len(degs)):
+                        if abs(degs[i] - self._last_good_hw_deg[i]) > MAX_PLAUSIBLE_JUMP_DEG:
+                            if abs(degs[i] - self._last_cmd_deg[i]) > MAX_PLAUSIBLE_JUMP_DEG:
+                                near_cmd = False
+                                break
+                if near_cmd:
+                    self._flog.info(
+                        "Large move on %s (%.1f°) accepted — near command target "
+                        "(hw=%.1f°, cmd=%.1f°, prev=%.1f°)"
+                        % (SERVO_ORDER[worst_idx], worst_jump,
+                           degs[worst_idx], self._last_cmd_deg[worst_idx],
+                           self._last_good_hw_deg[worst_idx])
+                    )
+                else:
+                    reject_reason = (
+                        "implausible %.1f° jump on %s (hw=%.1f°, prev=%.1f°)"
+                        % (worst_jump, SERVO_ORDER[worst_idx],
+                           degs[worst_idx], self._last_good_hw_deg[worst_idx])
+                    )
 
         if reject_reason is not None:
             self._consecutive_invalid_reads += 1
