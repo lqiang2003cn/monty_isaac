@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>monty_bt</name>
+  <version>0.1.0</version>
+  <description>BehaviorTree.CPP pick-and-place orchestrator for the X3plus arm</description>
+  <maintainer email="monty@todo.todo">monty</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>std_srvs</depend>
+  <depend>rcl_interfaces</depend>
+  <depend>ament_index_cpp</depend>
+  <depend>behaviortree_cpp</depend>
+  <depend>behaviortree_ros2</depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

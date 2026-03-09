@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Combined pick-and-place behavior tree for X3plus arm.
+  Runs Pick, then GoHome transit, then Place in sequence.
+
+  Blackboard inputs expected (set by bt_pick_place_node before ticking):
+    bx, by, bz                     - pick block surface position
+    px, py, pz                     - place surface position
+    qx, qy, qz, qw                - shared quaternion (used by both pick and place)
+    approach_height, grasp_depth   - geometry params
+    g_open, g_closed               - gripper values
+    execute                        - true = move arm, false = plan only
+-->
+<root BTCPP_format="4" main_tree_to_execute="PickAndPlace">
+
+  <BehaviorTree ID="PickAndPlace">
+    <Sequence>
+      <SubTree ID="Pick" _autoremap="true"/>
+      <SubTree ID="Place" _autoremap="true"/>
+    </Sequence>
+  </BehaviorTree>
+
+  <!-- Include the Pick and Place sub-trees inline -->
+
+  <BehaviorTree ID="Pick">
+    <Sequence>
+      <ComputeGraspParams bx="{bx}" by="{by}" bz="{bz}"
+                          qx="{qx}" qy="{qy}" qz="{qz}" qw="{qw}"
+                          approach_height="{approach_height}"
+                          grasp_depth="{grasp_depth}"
+                          z_grasp="{z_grasp}" z_approach="{z_approach}" j5="{j5}"/>
+
+      <SetPlannerParams service_name="/x3plus_5dof_planner/set_parameters"
+                        target_grip="{g_open}" execute="{execute}"/>
+      <CallTriggerService service_name="/x3plus_5dof_planner/set_gripper"/>
+
+      <SetPlannerParams service_name="/x3plus_5dof_planner/set_parameters"
+                        target_x="{bx}" target_y="{by}" target_z="{z_approach}"
+                        target_pitch="-1.5708" target_roll="{j5}"
+                        execute="{execute}"/>
+      <CallTriggerService service_name="/x3plus_5dof_planner/plan_position_orient"/>
+
+      <SetPlannerParams service_name="/x3plus_5dof_planner/set_parameters"
+                        target_x="{bx}" target_y="{by}" target_z="{z_grasp}"
+                        execute="{execute}"/>
+      <CallTriggerService service_name="/x3plus_5dof_planner/plan_straight_line"/>
+
+      <SetPlannerParams service_name="/x3plus_5dof_planner/set_parameters"
+                        target_grip="{g_closed}" execute="{execute}"/>
+      <CallTriggerService service_name="/x3plus_5dof_planner/set_gripper"/>
+
+      <SetPlannerParams service_name="/x3plus_5dof_planner/set_parameters"
+                        target_x="{bx}" target_y="{by}" target_z="{z_approach}"
+                        execute="{execute}"/>
+      <CallTriggerService service_name="/x3plus_5dof_planner/plan_straight_line"/>
+    </Sequence>
+  </BehaviorTree>
+
+  <BehaviorTree ID="Place">
+    <Sequence>
+      <ComputeGraspParams bx="{px}" by="{py}" bz="{pz}"
+                          qx="{qx}" qy="{qy}" qz="{qz}" qw="{qw}"
+                          approach_height="{approach_height}"
+                          grasp_depth="{grasp_depth}"
+                          z_grasp="{z_place}" z_approach="{z_approach_p}" j5="{j5_p}"/>
+
+      <SetPlannerParams service_name="/x3plus_5dof_planner/set_parameters"
+                        target_x="{px}" target_y="{py}" target_z="{z_approach_p}"
+                        target_pitch="-1.5708" target_roll="{j5_p}"
+                        execute="{execute}"/>
+      <CallTriggerService service_name="/x3plus_5dof_planner/plan_position_orient"/>
+
+      <SetPlannerParams service_name="/x3plus_5dof_planner/set_parameters"
+                        target_x="{px}" target_y="{py}" target_z="{z_place}"
+                        execute="{execute}"/>
+      <CallTriggerService service_name="/x3plus_5dof_planner/plan_straight_line"/>
+
+      <SetPlannerParams service_name="/x3plus_5dof_planner/set_parameters"
+                        target_grip="{g_open}" execute="{execute}"/>
+      <CallTriggerService service_name="/x3plus_5dof_planner/set_gripper"/>
+
+      <SetPlannerParams service_name="/x3plus_5dof_planner/set_parameters"
+                        target_x="{px}" target_y="{py}" target_z="{z_approach_p}"
+                        execute="{execute}"/>
+      <CallTriggerService service_name="/x3plus_5dof_planner/plan_straight_line"/>
+    </Sequence>
+  </BehaviorTree>
+
+</root>

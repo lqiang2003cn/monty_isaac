@@ -48,6 +48,7 @@ services:
       ZMQ_HOST: ${ZMQ_HOST:-192.168.31.142}
       ZMQ_PORT: ${ZMQ_PORT:-5555}
       DEBUG_LOGS: ${DEBUG_LOGS:-false}
+      USE_BT: ${USE_BT:-false}
     # ROBOT_MODE (isaac|real|zmq) and USE_MOVEIT (true|false) are set by the
     # caller's environment.  real_up.sh exports zmq+true; sim defaults apply.
     command: >-
@@ -57,6 +58,7 @@ services:
       zmq_host:=${ZMQ_HOST:-192.168.31.142}
       zmq_port:=${ZMQ_PORT:-5555}
       debug_logs:=${DEBUG_LOGS:-false}
+      use_bt:=${USE_BT:-false}
     volumes:
       - ./scripts:/scripts:ro
       - ./shared/x3plus_isaac/meshes:/shared/x3plus_isaac/meshes:ro

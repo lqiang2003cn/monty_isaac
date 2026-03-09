@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Pick behavior tree for X3plus arm.
+  Reproduces the exact 5-step sequence from x3plus_pick_place.py _pick_cb.
+
+  Blackboard inputs expected:
+    bx, by, bz          - block surface position (m)
+    qx, qy, qz, qw      - block surface quaternion
+    approach_height       - clearance above grasp (m)
+    grasp_depth           - wrist depth below block surface (m)
+    g_open, g_closed      - grip_joint values
+    execute               - true = move arm, false = plan only
+-->
+<root BTCPP_format="4" main_tree_to_execute="Pick">
+
+  <BehaviorTree ID="Pick">
+    <Sequence>
+
+      <!-- Compute derived values from block pose -->
+      <ComputeGraspParams bx="{bx}" by="{by}" bz="{bz}"
+                          qx="{qx}" qy="{qy}" qz="{qz}" qw="{qw}"
+                          approach_height="{approach_height}"
+                          grasp_depth="{grasp_depth}"
+                          z_grasp="{z_grasp}" z_approach="{z_approach}" j5="{j5}"/>
+
+      <!-- Step 1: open gripper -->
+      <SetPlannerParams service_name="/x3plus_5dof_planner/set_parameters"
+                        target_grip="{g_open}" execute="{execute}"/>
+      <CallTriggerService service_name="/x3plus_5dof_planner/set_gripper"/>
+
+      <!-- Step 2: move above block -->
+      <SetPlannerParams service_name="/x3plus_5dof_planner/set_parameters"
+                        target_x="{bx}" target_y="{by}" target_z="{z_approach}"
+                        target_pitch="-1.5708" target_roll="{j5}"
+                        execute="{execute}"/>
+      <CallTriggerService service_name="/x3plus_5dof_planner/plan_position_orient"/>
+
+      <!-- Step 3: descend straight line to grasp height -->
+      <SetPlannerParams service_name="/x3plus_5dof_planner/set_parameters"
+                        target_x="{bx}" target_y="{by}" target_z="{z_grasp}"
+                        execute="{execute}"/>
+      <CallTriggerService service_name="/x3plus_5dof_planner/plan_straight_line"/>
+
+      <!-- Step 4: close gripper -->
+      <SetPlannerParams service_name="/x3plus_5dof_planner/set_parameters"
+                        target_grip="{g_closed}" execute="{execute}"/>
+      <CallTriggerService service_name="/x3plus_5dof_planner/set_gripper"/>
+
+      <!-- Step 5: ascend straight line back to approach height -->
+      <SetPlannerParams service_name="/x3plus_5dof_planner/set_parameters"
+                        target_x="{bx}" target_y="{by}" target_z="{z_approach}"
+                        execute="{execute}"/>
+      <CallTriggerService service_name="/x3plus_5dof_planner/plan_straight_line"/>
+
+    </Sequence>
+  </BehaviorTree>
+
+</root>

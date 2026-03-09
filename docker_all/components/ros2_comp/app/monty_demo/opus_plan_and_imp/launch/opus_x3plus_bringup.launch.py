@@ -45,6 +45,7 @@ def generate_launch_description():
     mode_is_real = PythonExpression(["'", LaunchConfiguration("mode"), "' == 'real'"])
     mode_is_zmq = PythonExpression(["'", LaunchConfiguration("mode"), "' == 'zmq'"])
     use_moveit = LaunchConfiguration("use_moveit")
+    use_bt = LaunchConfiguration("use_bt")
     debug_logs = LaunchConfiguration("debug_logs")
     log_level = PythonExpression([
         "'debug' if '", debug_logs, "' == 'true' else 'info'",
@@ -64,6 +65,7 @@ def generate_launch_description():
         DeclareLaunchArgument("zmq_port", default_value="5555", description="ZMQ service port (mode:=zmq)"),
         DeclareLaunchArgument("use_moveit", default_value="false", description="Launch MoveIt move_group"),
         DeclareLaunchArgument("debug_logs", default_value="false", description="Enable debug-level ROS console logging on planner and bridge nodes (noisy; prefer file logs)"),
+        DeclareLaunchArgument("use_bt", default_value="false", description="Launch the BT pick-place executor node"),
         Node(
             package="robot_state_publisher",
             executable="robot_state_publisher",
@@ -139,5 +141,12 @@ def generate_launch_description():
             output="screen",
             condition=IfCondition(use_moveit),
             ros_arguments=["--log-level", log_level],
+        ),
+        Node(
+            package="monty_bt",
+            executable="bt_pick_place_node",
+            name="bt_pick_place",
+            output="screen",
+            condition=IfCondition(use_bt),
         ),
     ])

@@ -22,9 +22,11 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         ros-jazzy-xacro \
         ros-jazzy-moveit \
         ros-jazzy-trac-ik-kinematics-plugin \
+        ros-jazzy-behaviortree-cpp \
         python3-colcon-common-extensions \
         python3-rosdep \
-        python3-zmq
+        python3-zmq \
+        git
 
 WORKDIR /ws
 
@@ -34,8 +36,16 @@ COPY shared/x3plus_isaac/meshes /ws/src/monty_demo/x3plus_robot/meshes
 # Init positions YAML — baked in so it works even without the volume mount
 COPY shared/x3plus_config/init_positions.yaml /shared/x3plus_config/init_positions.yaml
 
+# BehaviorTree.ROS2 wrappers (not released as apt package for Jazzy)
+RUN git clone --depth 1 https://github.com/BehaviorTree/BehaviorTree.ROS2.git \
+        /ws/src/BehaviorTree.ROS2
+
+# BT pick-and-place package
+COPY components/ros2_comp/app/monty_bt /ws/src/monty_bt
+
 RUN . /opt/ros/jazzy/setup.sh \
-    && colcon build --packages-select monty_demo
+    && colcon build --packages-select \
+        btcpp_ros2_interfaces behaviortree_ros2 monty_bt monty_demo
 
 # Generate plain Isaac URDF from the single-source xacro (baked into image)
 RUN . /opt/ros/jazzy/setup.sh \
@@ -67,6 +77,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         ros-jazzy-xacro \
         ros-jazzy-moveit \
         ros-jazzy-trac-ik-kinematics-plugin \
+        ros-jazzy-behaviortree-cpp \
         python3-matplotlib \
         python3-zmq
 

@@ -24,12 +24,16 @@ Here is my vision:
 
 ########################################################################
 ################## real ##################
-# start all (bringup + MoveIt + planner, streams logs)
-# serial device on Orin is auto-detected (whichever /dev/ttyUSB* exists)
-./scripts/real_up.sh
+USE_BT=true ./scripts/real_up.sh
 
-# verbose: enable ROS debug-level console logs for bridge + planner
-DEBUG_LOGS=true ./scripts/real_up.sh
+# 100-cycle BT test (live)
+docker compose exec ros2_comp bash -l -c "ros2 run monty_demo bt_pick_place_test -n 100"
+
+# Dry-run (no motion)
+docker compose exec ros2_comp bash -l -c "ros2 run monty_demo bt_pick_place_test --dry-run -n 10"
+
+# Reuse same poses as original test for direct comparison
+docker compose exec ros2_comp bash -l -c "ros2 run monty_demo bt_pick_place_test --points-file pick_place_test_points.json -n 27"
 
 
 # ----------------------- test pickup ----------------------------#
