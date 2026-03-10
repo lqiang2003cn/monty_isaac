@@ -4,6 +4,9 @@
 # mode:=real  -> launches opus_x3plus_real_bridge node (local USB serial).
 # mode:=zmq   -> launches opus_x3plus_zmq_bridge node (remote robot via ZMQ).
 #
+# use_camera:=true -> launches Intel RealSense RGBD camera via realsense2_camera.
+# use_rviz:=true   -> launches RViz2 with camera + robot display.
+#
 # use_sim_time is always false: the topic-based hardware interface uses
 # wall-clock timestamps and does not require a /clock publisher. Isaac Sim's
 # rclpy bridge has a Python version mismatch (3.11 vs 3.12) that prevents
@@ -17,11 +20,19 @@ import subprocess
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, LogInfo
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
+
+_CAMERA_AVAILABLE = False
+_CAMERA_PKG_DIR = ""
+try:
+    _CAMERA_PKG_DIR = get_package_share_directory("realsense2_camera")
+    _CAMERA_AVAILABLE = True
+except Exception:
+    pass
 
 
 def _strip_ros2_control(urdf_str: str) -> str:
@@ -34,6 +45,7 @@ def generate_launch_description():
     urdf_dir = os.path.join(pkg_dir, "urdf")
     urdf_xacro = os.path.join(pkg_dir, "urdf", "x3plus.urdf.xacro")
     controllers_yaml = os.path.join(pkg_dir, "config", "opus_x3plus_controllers.yaml")
+    rviz_config = os.path.join(pkg_dir, "config", "camera_view.rviz")
 
     robot_description_full = subprocess.check_output(
         ["xacro", urdf_xacro, "robot_name:=x3plus"],
@@ -46,6 +58,8 @@ def generate_launch_description():
     mode_is_zmq = PythonExpression(["'", LaunchConfiguration("mode"), "' == 'zmq'"])
     use_moveit = LaunchConfiguration("use_moveit")
     use_bt = LaunchConfiguration("use_bt")
+    use_camera = LaunchConfiguration("use_camera")
+    use_rviz = LaunchConfiguration("use_rviz")
     debug_logs = LaunchConfiguration("debug_logs")
     log_level = PythonExpression([
         "'debug' if '", debug_logs, "' == 'true' else 'info'",
@@ -58,7 +72,7 @@ def generate_launch_description():
         condition=IfCondition(use_moveit),
     )
 
-    return LaunchDescription([
+    actions = [
         DeclareLaunchArgument("mode", default_value="isaac", description="isaac, real, or zmq"),
         DeclareLaunchArgument("serial_port", default_value="/dev/ttyUSB0", description="Serial port for real robot (mode:=real)"),
         DeclareLaunchArgument("zmq_host", default_value="192.168.31.142", description="ZMQ service host (mode:=zmq)"),
@@ -66,6 +80,8 @@ def generate_launch_description():
         DeclareLaunchArgument("use_moveit", default_value="false", description="Launch MoveIt move_group"),
         DeclareLaunchArgument("debug_logs", default_value="false", description="Enable debug-level ROS console logging on planner and bridge nodes (noisy; prefer file logs)"),
         DeclareLaunchArgument("use_bt", default_value="false", description="Launch the BT pick-place executor node"),
+        DeclareLaunchArgument("use_camera", default_value="false", description="Launch Intel RealSense RGBD camera"),
+        DeclareLaunchArgument("use_rviz", default_value="false", description="Launch RViz2 with camera + robot view"),
         Node(
             package="robot_state_publisher",
             executable="robot_state_publisher",
@@ -149,4 +165,58 @@ def generate_launch_description():
             output="screen",
             condition=IfCondition(use_bt),
         ),
-    ])
+    ]
+
+    if _CAMERA_AVAILABLE:
+        _rs_launch = os.path.join(_CAMERA_PKG_DIR, "launch", "rs_launch.py")
+        actions.append(
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(_rs_launch),
+                launch_arguments={
+                    "camera_name": "cam",
+                    "camera_namespace": "",
+                    "pointcloud.enable": "true",
+                    "align_depth.enable": "true",
+                    "enable_color": "true",
+                    "enable_depth": "true",
+                    "enable_infra1": "false",
+                    "enable_infra2": "false",
+                    "initial_reset": "true",
+                }.items(),
+                condition=IfCondition(use_camera),
+            )
+        )
+        actions.append(
+            Node(
+                package="tf2_ros",
+                executable="static_transform_publisher",
+                name="cam_tf",
+                arguments=[
+                    "--x", "0", "--y", "0", "--z", "0",
+                    "--roll", "0", "--pitch", "0", "--yaw", "0",
+                    "--frame-id", "camera_link",
+                    "--child-frame-id", "cam_link",
+                ],
+                condition=IfCondition(use_camera),
+            )
+        )
+    else:
+        actions.append(
+            LogInfo(
+                msg="realsense2_camera package not found — camera launch skipped",
+                condition=IfCondition(use_camera),
+            )
+        )
+
+    actions.append(
+        Node(
+            package="rviz2",
+            executable="rviz2",
+            name="rviz2",
+            output="screen",
+            arguments=["-d", rviz_config],
+            condition=IfCondition(use_rviz),
+        ),
+    )
+
+    return LaunchDescription(actions)

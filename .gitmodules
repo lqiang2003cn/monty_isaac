@@ -1,0 +1,3 @@
+[submodule "docker_all/third_party/tbp.monty"]
+	path = docker_all/third_party/tbp.monty
+	url = https://github.com/thousandbrainsproject/tbp.monty.git

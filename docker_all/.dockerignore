@@ -10,6 +10,17 @@ scripts/
 # Component template skeleton
 components/_template/
 
+# tbp.monty submodule: only needed by monty_comp — allow COPY but exclude
+# heavy non-essential dirs to speed up build context transfer.
+third_party/tbp.monty/.git
+third_party/tbp.monty/tests
+third_party/tbp.monty/docs
+third_party/tbp.monty/benchmarks
+third_party/tbp.monty/rfcs
+third_party/tbp.monty/tools
+third_party/tbp.monty/.github
+third_party/tbp.monty/.vale
+
 # Docker and compose files themselves
 **/Dockerfile
 **/.dockerignore

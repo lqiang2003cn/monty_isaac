@@ -19,6 +19,7 @@
 #include <ament_index_cpp/get_package_share_directory.hpp>
 
 #include <behaviortree_cpp/bt_factory.h>
+#include <behaviortree_cpp/loggers/groot2_publisher.h>
 #include <behaviortree_ros2/ros_node_params.hpp>
 
 #include "monty_bt/set_planner_params.hpp"
@@ -58,6 +59,7 @@ public:
     declare_parameter("grip_closed", GRIP_CLOSED);
     declare_parameter("execute", true);
     declare_parameter("dry_run", false);
+    declare_parameter("groot_port", 0);
 
     std::string pkg_share =
         ament_index_cpp::get_package_share_directory("monty_bt");
@@ -69,6 +71,7 @@ public:
   void init()
   {
     register_bt_nodes();
+    groot_port_ = get_parameter("groot_port").as_int();
 
     srv_cb_group_ = create_callback_group(
         rclcpp::CallbackGroupType::MutuallyExclusive);
@@ -97,6 +100,12 @@ public:
         },
         rclcpp::ServicesQoS(), srv_cb_group_);
 
+    if (groot_port_ > 0)
+    {
+      RCLCPP_INFO(get_logger(),
+                  "Groot2 monitor on port %d (connects on first service call)",
+                  groot_port_);
+    }
     RCLCPP_INFO(get_logger(),
                 "BT pick-place ready. Services: ~/run_pick, ~/run_place, "
                 "~/run_pick_and_place");
@@ -181,10 +190,12 @@ private:
   {
     RCLCPP_INFO(get_logger(), "%s requested (BT)", mode.c_str());
 
-    BT::Tree tree;
+    // Tear down publisher before replacing tree (stops ZMQ thread)
+    groot_pub_.reset();
+
     try
     {
-      tree = factory_.createTreeFromFile(tree_path);
+      active_tree_ = factory_.createTreeFromFile(tree_path);
     }
     catch (const std::exception& e)
     {
@@ -195,12 +206,18 @@ private:
       return;
     }
 
-    populate_blackboard(tree.rootBlackboard(), mode);
+    populate_blackboard(active_tree_.rootBlackboard(), mode);
+
+    if (groot_port_ > 0)
+    {
+      groot_pub_ = std::make_unique<BT::Groot2Publisher>(
+          active_tree_, static_cast<unsigned>(groot_port_));
+    }
 
     BT::NodeStatus status = BT::NodeStatus::RUNNING;
     while (rclcpp::ok() && status == BT::NodeStatus::RUNNING)
     {
-      status = tree.tickOnce();
+      status = active_tree_.tickOnce();
       std::this_thread::sleep_for(50ms);
     }
 
@@ -222,6 +239,10 @@ private:
   std::string pick_tree_path_;
   std::string place_tree_path_;
   std::string pick_and_place_tree_path_;
+
+  BT::Tree active_tree_;
+  std::unique_ptr<BT::Groot2Publisher> groot_pub_;
+  int groot_port_{0};
 
   rclcpp::CallbackGroup::SharedPtr srv_cb_group_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr run_pick_srv_;

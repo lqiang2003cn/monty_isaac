@@ -40,3 +40,6 @@ docker_all/logs/
 # Local env (passwords, host overrides) — do not commit
 .env
 docker_all/.env
+
+# Monty data and results (large, downloaded at runtime)
+docker_all/data/

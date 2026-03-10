@@ -1,0 +1,82 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+  - Class: rviz_common/Views
+    Name: Views
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/RobotModel
+      Name: RobotModel
+      Enabled: true
+      Description Topic:
+        Value: /robot_description
+      TF Prefix: ""
+    - Class: rviz_default_plugins/TF
+      Name: TF
+      Enabled: false
+    - Class: rviz_default_plugins/Image
+      Name: Color Image
+      Enabled: true
+      Topic:
+        Value: /cam/color/image_raw
+        Reliability Policy: Reliable
+        Durability Policy: Volatile
+      Max Value: 1.0
+      Min Value: 0.0
+      Normalize Range: true
+    - Class: rviz_default_plugins/Image
+      Name: Depth Image
+      Enabled: true
+      Topic:
+        Value: /cam/depth/image_rect_raw
+        Reliability Policy: Reliable
+        Durability Policy: Volatile
+      Max Value: 1.0
+      Min Value: 0.0
+      Normalize Range: true
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Depth Point Cloud
+      Enabled: true
+      Topic:
+        Value: /cam/depth/color/points
+        Reliability Policy: Reliable
+        Durability Policy: Volatile
+      Size (Pixels): 2
+      Style: Points
+      Color Transformer: RGB8
+  Global Options:
+    Background Color: 48; 48; 48
+    Fixed Frame: base_link
+    Frame Rate: 30
+  Name: root
+  Tools:
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/FocusCamera
+  Value: true
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 1.0
+      Focal Point:
+        X: 0.15
+        Y: 0.0
+        Z: 0.1
+      Focal Shape Fixed Size: true
+      Name: Current View
+      Pitch: 0.5
+      Yaw: 0.8
+      Value: Orbit (rviz_default_plugins)
+Window Geometry:
+  Displays:
+    collapsed: false
+  Height: 900
+  Width: 1400
+  X: 100
+  Y: 100
+  Views:
+    collapsed: false
+  Color Image:
+    collapsed: false
+  Depth Image:
+    collapsed: false

@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "monty_ext"
+version = "0.1.0"
+description = "LQTech extensions for tbp.monty — custom sensors, environments, and configs"
+requires-python = ">=3.8"
+dependencies = [
+    # tbp.monty is installed separately (from submodule, not PyPI)
+    # Additional deps for our extensions:
+    # "open3d",
+    # "trimesh",
+]
+
+[project.optional-dependencies]
+vfm = [
+    # Vision foundation model deps (SAM2, DINOv2, VGGT)
+    # "segment-anything-2",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["monty_ext*"]

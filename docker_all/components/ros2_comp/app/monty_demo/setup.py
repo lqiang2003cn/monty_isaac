@@ -28,6 +28,7 @@ setup(
             "share/" + package_name + "/config",
             [
                 "opus_plan_and_imp/config/opus_x3plus_controllers.yaml",
+                "opus_plan_and_imp/config/camera_view.rviz",
                 "x3plus_robot/config/x3plus.srdf",
                 "x3plus_robot/config/kinematics.yaml",
                 "x3plus_robot/config/joint_limits.yaml",

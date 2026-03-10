@@ -13,7 +13,8 @@ FROM ros:jazzy AS urdf-gen
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update && apt-get install -y --no-install-recommends ros-jazzy-xacro
+    rm -f /etc/apt/apt.conf.d/docker-clean \
+    && apt-get update && apt-get install -y --no-install-recommends ros-jazzy-xacro
 
 COPY components/ros2_comp/app/monty_demo/x3plus_robot/urdf/ /urdf/
 RUN . /opt/ros/jazzy/setup.sh \

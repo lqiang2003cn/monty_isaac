@@ -16,6 +16,8 @@
 #   REMOTE_ORIN_SERIAL_DEVICE  override serial device on Orin (auto-detected by default)
 #   SKIP_REMOTE_BUILD    set to 1 to skip remote sync/build and only run local compose
 #   REMOTE_BUILD_ON_ORIN set to 1 to build on Orin instead (needs Docker Hub reachable on Orin)
+#   START_GROOT          set to true to launch Groot2 and enable BT monitoring (requires Groot2 PRO for >20 nodes)
+#   GROOT2_BIN           path to Groot2 AppImage (auto-detected in ~/bin/ if unset)
 set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DOCKER_ALL="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -211,12 +213,45 @@ clean_old_logs() {
   echo "[real_up] Log history: ${#runs[@]} run(s), $(( remaining_kb / 1024 )) MB total"
 }
 
+launch_groot2() {
+  if [[ "${START_GROOT:-false}" != "true" ]]; then
+    return 0
+  fi
+  local groot2="${GROOT2_BIN:-}"
+  if [[ -z "$groot2" ]]; then
+    for f in "$HOME"/bin/Groot2*.AppImage \
+             "$HOME"/Groot2*.AppImage \
+             "$HOME"/Downloads/Groot2*.AppImage \
+             "$HOME"/Applications/Groot2*.AppImage; do
+      [[ -x "$f" ]] && groot2="$f" && break
+    done
+  fi
+  if [[ -n "$groot2" ]] && [[ -x "$groot2" ]]; then
+    echo "[real_up] Launching Groot2 ($groot2)"
+    echo "[real_up]   → Click Monitor → connect to localhost:1667"
+    nohup "$groot2" &>/dev/null &
+    disown
+  else
+    echo "[real_up] Groot2 not found — BT will run without visualization."
+    echo "[real_up]   Download: https://www.behaviortree.dev/groot"
+    echo "[real_up]   Place AppImage in ~/bin/ (chmod +x) or set GROOT2_BIN=/path/to/Groot2.AppImage"
+  fi
+}
+
 run_remote_build
 cd "$DOCKER_ALL"
 
 export ROBOT_MODE=zmq
 export USE_MOVEIT=true
 export DEBUG_LOGS="${DEBUG_LOGS:-false}"
+export USE_CAMERA="${USE_CAMERA:-true}"
+export USE_RVIZ="${USE_RVIZ:-true}"
+export USE_MONTY="${USE_MONTY:-false}"
+
+# Allow Docker containers to access X11 display (for RViz)
+if [[ "${USE_RVIZ}" == "true" ]] && command -v xhost &>/dev/null; then
+  xhost +local:root &>/dev/null || true
+fi
 
 # Per-run log directory — each run gets its own timestamped subdir under logs/
 export RUN_ID="$(date +%Y%m%d_%H%M%S)"
@@ -226,8 +261,40 @@ mkdir -p "$DOCKER_ALL/logs/$RUN_ID"
 # If no args (or only empty arg), default to "up --build" so logs stream to terminal
 if [[ $# -eq 0 ]] || { [[ $# -eq 1 ]] && [[ -z "${1:-}" ]]; }; then
   echo "[real_up] No arguments: starting local stack (docker compose up --build). Logs will stream below."
-  echo "[real_up] ROBOT_MODE=$ROBOT_MODE  USE_MOVEIT=$USE_MOVEIT  DEBUG_LOGS=$DEBUG_LOGS  RUN_ID=$RUN_ID"
+  echo "[real_up] ROBOT_MODE=$ROBOT_MODE  USE_MOVEIT=$USE_MOVEIT  USE_CAMERA=$USE_CAMERA  USE_RVIZ=$USE_RVIZ  DEBUG_LOGS=$DEBUG_LOGS  USE_MONTY=$USE_MONTY  RUN_ID=$RUN_ID"
   set -- up --build
 fi
 echo "[real_up] go_home will execute automatically once the planner and MoveIt are ready."
-exec docker compose "$@"
+launch_groot2
+
+# Build compose command
+COMPOSE_ARGS=()
+if [[ "${USE_CAMERA}" == "true" ]]; then
+  # Detect Intel RealSense cameras by USB vendor ID (8086).
+  RS_COUNT=0
+  for sysdev in /sys/bus/usb/devices/*/idVendor; do
+    vid="$(cat "$sysdev" 2>/dev/null)" || continue
+    [[ "$vid" != "8086" ]] && continue
+    pid="$(cat "$(dirname "$sysdev")/idProduct" 2>/dev/null)" || continue
+    # RealSense D4xx product IDs: 0b5c (D455), 0b07 (D435), 0b3a (D435i), 0b64 (D405), etc.
+    case "$pid" in 0b*)
+      RS_COUNT=$((RS_COUNT + 1)) || true
+      ;;
+    esac
+  done
+  if (( RS_COUNT > 0 )); then
+    echo "[real_up] Found ${RS_COUNT} Intel RealSense camera(s) on USB."
+  else
+    echo "[real_up] WARNING: USE_CAMERA=true but no RealSense cameras found on USB. Starting without camera."
+    echo "[real_up]   Plug in the camera and restart, or set USE_CAMERA=false."
+    export USE_CAMERA=false
+  fi
+fi
+if [[ "${USE_MONTY}" == "true" ]]; then
+  echo "[real_up] Monty enabled. monty_comp will start alongside ros2_comp."
+  echo "[real_up]   Run experiments: docker compose exec monty_comp bash"
+  echo "[real_up]   Then inside:    conda activate tbp.monty && python -m monty_ext ..."
+  mkdir -p "$DOCKER_ALL/data/monty" "$DOCKER_ALL/data/monty_results"
+  COMPOSE_ARGS+=(--profile monty)
+fi
+exec docker compose "${COMPOSE_ARGS[@]}" "$@"

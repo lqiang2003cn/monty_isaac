@@ -24,7 +24,7 @@ Here is my vision:
 
 ########################################################################
 ################## real ##################
-USE_BT=true ./scripts/real_up.sh
+USE_BT=true USE_MONTY=true ./scripts/real_up.sh
 
 # 100-cycle BT test (live)
 docker compose exec ros2_comp bash -l -c "ros2 run monty_demo bt_pick_place_test -n 100"

@@ -22,6 +22,9 @@ def generate_launch_description():
         DeclareLaunchArgument(
             "dry_run", default_value="false",
             description="Safety lockout: forces execute=false"),
+        DeclareLaunchArgument(
+            "groot_port", default_value="0",
+            description="Groot2 ZMQ monitor port (0 = disabled, 1667 = default Groot2 port)"),
 
         Node(
             package="monty_bt",
@@ -31,6 +34,7 @@ def generate_launch_description():
             parameters=[{
                 "execute": LaunchConfiguration("execute"),
                 "dry_run": LaunchConfiguration("dry_run"),
+                "groot_port": LaunchConfiguration("groot_port"),
             }],
         ),
     ])
