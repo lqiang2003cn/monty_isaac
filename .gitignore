@@ -43,3 +43,6 @@ docker_all/.env
 
 # Monty data and results (large, downloaded at runtime)
 docker_all/data/
+
+# Reference repos (cloned for reading, not part of this project)
+docker_all/third_party/everything_is_awesome/

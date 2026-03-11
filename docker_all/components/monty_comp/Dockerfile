@@ -48,6 +48,11 @@ RUN --mount=type=cache,target=/opt/conda/pkgs \
 # ---------------------------------------------------------------------------
 FROM conda-env AS runtime
 
+# Runtime library needed by pyrealsense2 (installed separately to avoid
+# invalidating the conda-env cache when adding new apt packages).
+RUN apt-get update && apt-get install -y --no-install-recommends libusb-1.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
 # Copy tbp.monty source and install as a non-editable package.
 # Uses --no-build-isolation so pip sees the conda env's packages (numpy,
 # torch, etc.) and only installs missing pip-only deps (omegaconf, hydra,
@@ -57,15 +62,46 @@ COPY third_party/tbp.monty /opt/tbp.monty
 RUN conda run --no-capture-output -n tbp.monty \
     pip install --no-build-isolation /opt/tbp.monty
 
+# Lightweight deps that work with tbp.monty's Python 3.8 + torch 1.13
+RUN conda run --no-capture-output -n tbp.monty \
+    pip install --no-build-isolation \
+        opencv-python-headless \
+        pyzmq
+
+# ---------------------------------------------------------------------------
+# Vision env — SAM2 + VGGT need modern torch (>=2.5) and Python 3.11.
+# tbp.monty is pinned to torch 1.13 + torch-geometric, so they cannot
+# coexist.  The vision env runs as a subprocess server; the tbp.monty
+# env communicates via JSON-lines + numpy files on /dev/shm.
+# ---------------------------------------------------------------------------
+RUN conda create -n vision python=3.11 -y \
+    && conda clean -afy
+
+RUN conda run --no-capture-output -n vision \
+    pip install \
+        torch==2.5.1 torchvision==0.20.1 \
+        --index-url https://download.pytorch.org/whl/cu121
+
+RUN conda run --no-capture-output -n vision \
+    pip install --no-build-isolation \
+        "sam-2 @ git+https://github.com/facebookresearch/sam2.git" \
+        opencv-python-headless
+
+RUN conda run --no-capture-output -n vision \
+    pip install --no-build-isolation \
+        "vggt @ git+https://github.com/facebookresearch/vggt.git"
+
 # Copy and install our extension package (lightweight, fast rebuild).
-# Layout: /opt/monty_ext_pkg/pyproject.toml
-#          /opt/monty_ext_pkg/monty_ext/__init__.py  (the actual package)
 COPY components/monty_comp/app /opt/monty_ext_pkg
 RUN conda run --no-capture-output -n tbp.monty \
     pip install --no-deps /opt/monty_ext_pkg
+# Also install in vision env so _server.py is importable via subprocess.
+RUN conda run --no-capture-output -n vision \
+    pip install --no-deps /opt/monty_ext_pkg
 
 # Monty data and results directories (bind-mounted at runtime)
-RUN mkdir -p /data /results /var/log/monty
+# /models caches downloaded model weights (SAM2, VGGT) across container restarts.
+RUN mkdir -p /data /results /var/log/monty /models
 
 # Activate the conda env in every interactive shell session
 RUN conda init bash \

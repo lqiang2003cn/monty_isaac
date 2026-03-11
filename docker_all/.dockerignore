@@ -10,6 +10,9 @@ scripts/
 # Component template skeleton
 components/_template/
 
+# Reference-only repos — never needed inside any container
+third_party/everything_is_awesome/
+
 # tbp.monty submodule: only needed by monty_comp — allow COPY but exclude
 # heavy non-essential dirs to speed up build context transfer.
 third_party/tbp.monty/.git

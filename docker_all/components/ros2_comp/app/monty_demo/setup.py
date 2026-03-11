@@ -69,6 +69,7 @@ setup(
             "x3plus_pick_place = monty_demo.x3plus_pick_place:main",
             "pick_place_test = monty_demo.pick_place_test:main",
             "bt_pick_place_test = monty_demo.bt_pick_place_test:main",
+            "scan_control_bridge = monty_demo.scan_control_bridge:main",
         ],
     },
 )

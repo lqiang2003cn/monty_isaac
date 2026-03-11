@@ -63,6 +63,7 @@ services:
       USE_BT: ${USE_BT:-false}
       USE_CAMERA: ${USE_CAMERA:-false}
       USE_RVIZ: ${USE_RVIZ:-false}
+      USE_MONTY: ${USE_MONTY:-false}
     # ROBOT_MODE (isaac|real|zmq) and USE_MOVEIT (true|false) are set by the
     # caller's environment.  real_up.sh exports zmq+true; sim defaults apply.
     command: >-
@@ -75,8 +76,10 @@ services:
       use_bt:=${USE_BT:-false}
       use_camera:=${USE_CAMERA:-false}
       use_rviz:=${USE_RVIZ:-false}
+      use_monty:=${USE_MONTY:-false}
     ports:
       - "1667:1667"
+      - "5561:5561"
     # RealSense / depth cameras need broad USB device access inside the container.
     privileged: true
     volumes:
@@ -98,6 +101,7 @@ services:
     profiles: ["monty"]
     tty: true
     stdin_open: true
+    privileged: true
     deploy:
       resources:
         reservations:
@@ -113,16 +117,30 @@ services:
       MONTY_DATA: /data
       MONTY_LOGS: /results
       MONTY_MODELS: /results/pretrained_models
+      MODEL_CACHE_DIR: /models
+      HF_HOME: /models/huggingface
+      USE_CAMERA: ${USE_CAMERA:-false}
+    command: >-
+      bash -c "conda run --no-capture-output -n tbp.monty turntable-scan"
+    ports:
+      - "5560:5560"
     volumes:
+      - /dev:/dev
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - /run/udev:/run/udev:ro
       # Monty data: YCB objects, scanned meshes, world images
       - ${MONTY_DATA:-./data/monty}:/data
       # Monty results: experiment logs, pretrained models
       - ${MONTY_RESULTS:-./data/monty_results}:/results
       # Per-run logs (shared with ros2_comp)
       - ./logs/${RUN_ID:-current}:/var/log/monty
+      # Model weight cache (SAM2, VGGT) — survives container rebuilds
+      - monty_model_cache:/models
     networks:
       - monty_net
+
+volumes:
+  monty_model_cache:
 
 networks:
   monty_net:

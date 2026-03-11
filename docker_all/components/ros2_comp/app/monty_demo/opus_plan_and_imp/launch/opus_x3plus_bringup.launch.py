@@ -60,6 +60,7 @@ def generate_launch_description():
     use_bt = LaunchConfiguration("use_bt")
     use_camera = LaunchConfiguration("use_camera")
     use_rviz = LaunchConfiguration("use_rviz")
+    use_monty = LaunchConfiguration("use_monty")
     debug_logs = LaunchConfiguration("debug_logs")
     log_level = PythonExpression([
         "'debug' if '", debug_logs, "' == 'true' else 'info'",
@@ -82,6 +83,7 @@ def generate_launch_description():
         DeclareLaunchArgument("use_bt", default_value="false", description="Launch the BT pick-place executor node"),
         DeclareLaunchArgument("use_camera", default_value="false", description="Launch Intel RealSense RGBD camera"),
         DeclareLaunchArgument("use_rviz", default_value="false", description="Launch RViz2 with camera + robot view"),
+        DeclareLaunchArgument("use_monty", default_value="false", description="Launch scan control bridge for Monty turntable scanning"),
         Node(
             package="robot_state_publisher",
             executable="robot_state_publisher",
@@ -207,6 +209,16 @@ def generate_launch_description():
                 condition=IfCondition(use_camera),
             )
         )
+
+    actions.append(
+        Node(
+            package="monty_demo",
+            executable="scan_control_bridge",
+            name="scan_control_bridge",
+            output="screen",
+            condition=IfCondition(use_monty),
+        ),
+    )
 
     actions.append(
         Node(

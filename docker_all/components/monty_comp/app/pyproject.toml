@@ -8,17 +8,19 @@ version = "0.1.0"
 description = "LQTech extensions for tbp.monty — custom sensors, environments, and configs"
 requires-python = ">=3.8"
 dependencies = [
-    # tbp.monty is installed separately (from submodule, not PyPI)
-    # Additional deps for our extensions:
+    # tbp.monty is installed separately (from submodule, not PyPI).
+    # Vision model deps are installed separately in the Dockerfile for layer caching.
+    # Listed here for documentation only (--no-deps install skips them):
+    # "pyrealsense2",
+    # "opencv-python-headless",
     # "open3d",
-    # "trimesh",
+    # "pyzmq",
+    # "sam-2",
+    # "vggt",
 ]
 
-[project.optional-dependencies]
-vfm = [
-    # Vision foundation model deps (SAM2, DINOv2, VGGT)
-    # "segment-anything-2",
-]
+[project.scripts]
+turntable-scan = "monty_ext.scripts.turntable_scan:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
