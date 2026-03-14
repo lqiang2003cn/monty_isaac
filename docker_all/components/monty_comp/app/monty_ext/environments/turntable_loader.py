@@ -1,185 +1,144 @@
-"""TurntableDataLoader — drives Monty's sensorimotor loop for turntable scanning.
+"""Motor policy and action classes for turntable-based learning.
 
-Mirrors the EnvironmentDataLoader from tbp.monty but adapted for the turntable
-use case where:
-- The camera is static; the turntable rotates the object.
-- Actions are just "next frame" signals (no motor commands).
-- The training policy is a simple deterministic sweep.
+Provides a ``TurntableTrainingPolicy`` that extends tbp.monty's
+``BasePolicy``, along with a trivial ``NextFrame`` action.  The policy
+simply advances one frame per step and raises ``StopIteration`` when the
+video is exhausted.
 
-Reference: tbp.monty.frameworks.environments.embodied_data.EnvironmentDataLoader
+These classes follow the same pattern as the everything_is_awesome
+``EverythingIsAwesomeTrainingPolicy`` and ``OrbitRight`` action.
 """
 
 from __future__ import annotations
 
 import logging
-import math
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
-from monty_ext.environments.turntable_env import (
-    TurntableConfig,
-    TurntableEnvironment,
-    TurntableObservations,
+from numpy.random import RandomState
+
+from tbp.monty.context import RuntimeContext
+from tbp.monty.frameworks.actions.action_samplers import ActionSampler
+from tbp.monty.frameworks.actions.actions import Action
+from tbp.monty.frameworks.agents import AgentID
+from tbp.monty.frameworks.models.abstract_monty_classes import Observations
+from tbp.monty.frameworks.models.motor_policies import (
+    BasePolicy,
+    MotorPolicyResult,
+)
+from tbp.monty.frameworks.models.motor_system_state import (
+    AgentState,
+    MotorSystemState,
 )
 
 logger = logging.getLogger(__name__)
 
 
-class TurntableAction:
-    """Trivial action: signal the environment to capture the next frame."""
+# ---------------------------------------------------------------------------
+# Action
+# ---------------------------------------------------------------------------
 
-    def __init__(self, agent_id: str = "agent_id_0"):
+class NextFrameActionSampler:
+    """Protocol-style sampler for NextFrame actions."""
+
+    def sample_next_frame(self, agent_id: AgentID, rng: RandomState) -> "NextFrame":
+        return NextFrame(agent_id=agent_id)
+
+
+class NextFrame:
+    """Trivial action: advance to the next video frame.
+
+    The ``VideoTurntableEnvironment`` ignores actions entirely (the video
+    determines the trajectory), but the upstream ``MotorSystem`` /
+    ``EnvironmentInterface`` pipeline requires an ``Action``-compatible
+    object.
+    """
+
+    agent_id: AgentID
+
+    def __init__(self, agent_id: AgentID) -> None:
         self.agent_id = agent_id
 
-    def act(self, actuator=None):
+    @classmethod
+    def action_name(cls) -> str:
+        return "next_frame"
+
+    @classmethod
+    def sample(
+        cls,
+        agent_id: AgentID,
+        sampler: NextFrameActionSampler,
+        rng: RandomState,
+    ) -> "NextFrame":
+        return sampler.sample_next_frame(agent_id, rng)
+
+    def act(self, actuator: Any = None) -> None:
         pass
 
 
-class TurntableTrainingPolicy:
-    """Deterministic scan policy for turntable learning.
+# ---------------------------------------------------------------------------
+# Action sampler
+# ---------------------------------------------------------------------------
 
-    Since the turntable handles object rotation, the policy simply issues
-    "next frame" actions until ``max_steps`` is reached, then raises
-    ``StopIteration``.
+class TurntableActionSampler(ActionSampler):
+    """ActionSampler that only produces NextFrame actions."""
 
-    Modelled after EverythingIsAwesomeTrainingPolicy.
+    def __init__(self):
+        super().__init__(actions=[])
+
+    def sample(self, agent_id: AgentID, rng: RandomState) -> NextFrame:
+        return NextFrame(agent_id=agent_id)
+
+    def sample_next_frame(self, agent_id: AgentID, rng: RandomState) -> NextFrame:
+        return NextFrame(agent_id=agent_id)
+
+
+# ---------------------------------------------------------------------------
+# Motor policy
+# ---------------------------------------------------------------------------
+
+class TurntableTrainingPolicy(BasePolicy):
+    """Deterministic training policy for turntable scans.
+
+    Advances one frame per step.  Raises ``StopIteration`` after
+    ``max_steps`` frames, signalling the experiment to end the episode.
+    This is exactly how EIA's ``EverythingIsAwesomeTrainingPolicy`` works.
     """
 
     def __init__(
         self,
-        agent_id: str = "agent_id_0",
+        action_sampler: ActionSampler | None = None,
+        agent_id: AgentID = "agent_id_0",
         max_steps: int = 1000,
     ):
-        self.agent_id = agent_id
-        self.max_steps = max_steps
+        if action_sampler is None:
+            action_sampler = TurntableActionSampler()
+        super().__init__(action_sampler=action_sampler, agent_id=agent_id)
         self.use_goal_state_driven_actions = False
+        self._max_steps = max_steps
         self._step = 0
 
-    def __call__(self, state=None) -> TurntableAction:
-        return self.dynamic_call(state)
-
-    def dynamic_call(self, state=None) -> TurntableAction:
-        if self._step >= self.max_steps:
-            raise StopIteration()
-        self._step += 1
-        return TurntableAction(agent_id=self.agent_id)
-
-    def pre_episode(self):
-        self._step = 0
-
-    def post_episode(self):
-        pass
-
-    def set_experiment_mode(self, mode: str):
-        pass
-
-    @property
-    def last_action(self):
-        return TurntableAction(agent_id=self.agent_id)
-
-
-class TurntableDataLoader:
-    """DataLoader that drives the turntable scan loop.
-
-    Works as an iterator: each ``next()`` call captures, segments, and
-    (when batch is ready) runs VGGT, then returns the observation in
-    Monty's expected format.
-
-    Usage::
-
-        loader = TurntableDataLoader(env_config=TurntableConfig(), ...)
-        for observation in loader:
-            model.step(observation)
-    """
-
-    def __init__(
+    def __call__(
         self,
-        env_config: Optional[TurntableConfig] = None,
-        max_train_steps: int = 1000,
-        object_name: str = "unknown",
-        transform=None,
-    ):
-        self._env_config = env_config or TurntableConfig()
-        self._max_steps = max_train_steps
-        self._object_name = object_name
-        self._transform = transform if transform is not None else []
+        ctx: RuntimeContext,
+        observations: Observations,
+        state: MotorSystemState | None = None,
+    ) -> MotorPolicyResult:
+        if self._step >= self._max_steps:
+            raise StopIteration("TurntableTrainingPolicy: max_steps reached")
 
-        self._env: Optional[TurntableEnvironment] = None
-        self._policy: Optional[TurntableTrainingPolicy] = None
-        self._is_first: bool = True
-        self._initial_obs = None
+        self._step += 1
+        action = NextFrame(agent_id=self.agent_id)
+        return MotorPolicyResult(actions=[action])
 
-    @property
-    def primary_target(self):
-        return self._object_name
+    def pre_episode(self) -> None:
+        self._step = 0
 
-    @primary_target.setter
-    def primary_target(self, value):
-        self._object_name = value
+    def get_agent_state(self, state: MotorSystemState) -> AgentState:
+        return state[self.agent_id]
 
-    # ------------------------------------------------------------------
-    # Iterator protocol
-    # ------------------------------------------------------------------
+    def state_dict(self) -> dict[str, Any]:
+        return {"step": self._step, "max_steps": self._max_steps}
 
-    def __iter__(self):
-        self._env = TurntableEnvironment(self._env_config)
-        self._policy = TurntableTrainingPolicy(
-            agent_id=self._env_config.agent_id,
-            max_steps=self._max_steps,
-        )
-        self._policy.pre_episode()
-
-        obs = self._env.reset()
-        state = self._env.get_state()
-        obs = self._apply_transforms(obs, state)
-        self._initial_obs = obs
-        self._is_first = True
-        return self
-
-    def __next__(self):
-        if self._is_first:
-            self._is_first = False
-            return self._initial_obs
-
-        try:
-            action = self._policy()
-        except StopIteration:
-            raise
-
-        obs = self._env.step(action)
-        state = self._env.get_state()
-        obs = self._apply_transforms(obs, state)
-        return obs
-
-    def __len__(self):
-        return math.inf
-
-    # ------------------------------------------------------------------
-    # Hooks called by MontyExperiment
-    # ------------------------------------------------------------------
-
-    def pre_episode(self):
-        if self._policy is not None:
-            self._policy.pre_episode()
-
-    def post_episode(self):
-        if self._policy is not None:
-            self._policy.post_episode()
-
-    def pre_epoch(self):
-        pass
-
-    def post_epoch(self):
-        pass
-
-    def finish(self):
-        if self._env is not None:
-            self._env.close()
-
-    # ------------------------------------------------------------------
-    # Transforms
-    # ------------------------------------------------------------------
-
-    def _apply_transforms(self, obs, state):
-        for t in self._transform:
-            obs = t(obs, state)
-        return obs
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        self._step = state_dict.get("step", 0)
+        self._max_steps = state_dict.get("max_steps", self._max_steps)

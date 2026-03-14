@@ -23,7 +23,9 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
+    tty: true
     environment:
+      PYTHONUNBUFFERED: "1"
       DISPLAY: ${DISPLAY}
       ISAAC_HEADLESS: ${ISAAC_HEADLESS:-0}
       ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
@@ -33,6 +35,8 @@ services:
       # Only mount meshes; URDF is generated at build time inside the image
       - ./shared/x3plus_isaac/meshes:/shared/x3plus_isaac/meshes:ro
       - ./shared/x3plus_config:/shared/x3plus_config:ro
+      - ./sim_videos:/sim_videos
+      - ./components/isaac_comp/app:/app:ro
     networks:
       - monty_net
 
@@ -90,6 +94,7 @@ services:
       - ./shared/x3plus_isaac/meshes:/shared/x3plus_isaac/meshes:ro
       - ./shared/x3plus_config:/shared/x3plus_config:ro
       - ./logs/${RUN_ID:-current}:/var/log/monty
+      - ./sim_videos:/sim_videos
     networks:
       - monty_net
 
@@ -120,6 +125,7 @@ services:
       MODEL_CACHE_DIR: /models
       HF_HOME: /models/huggingface
       USE_CAMERA: ${USE_CAMERA:-false}
+      SCAN_DIR: /data/scans
     command: >-
       bash -c "conda run --no-capture-output -n tbp.monty turntable-scan"
     ports:
@@ -128,7 +134,8 @@ services:
       - /dev:/dev
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - /run/udev:/run/udev:ro
-      # Monty data: YCB objects, scanned meshes, world images
+      # Monty data: YCB objects, scanned meshes, world images, turntable scans
+      # record-scan saves to host ./data/monty/scans/ → container /data/scans/
       - ${MONTY_DATA:-./data/monty}:/data
       # Monty results: experiment logs, pretrained models
       - ${MONTY_RESULTS:-./data/monty_results}:/results

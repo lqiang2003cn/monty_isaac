@@ -1,0 +1,17 @@
+---
+description: Scripts that must run in the vision conda environment
+globs: "**/monty_ext/scripts/record_scan.py"
+alwaysApply: false
+---
+
+# Vision Environment Requirement
+
+`record_scan.py` depends on `pyorbbecsdk` and `cv2`, which are only installed in the **vision** conda env.
+
+Always run with:
+
+```bash
+/home/lq/miniconda3/envs/vision/bin/python docker_all/components/monty_comp/app/monty_ext/scripts/record_scan.py [args...]
+```
+
+Never use `tbp.monty` env or bare `python` — they lack the camera SDK.

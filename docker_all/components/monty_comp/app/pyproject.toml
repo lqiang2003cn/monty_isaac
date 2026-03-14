@@ -17,10 +17,17 @@ dependencies = [
     # "pyzmq",
     # "sam-2",
     # "vggt",
+    # "plotly",
+    # "groundingdino",
 ]
 
 [project.scripts]
 turntable-scan = "monty_ext.scripts.turntable_scan:main"
+record-scan = "monty_ext.scripts.record_scan:main"
+turntable-learn = "monty_ext.scripts.turntable_learn:main"
+visualize-model = "monty_ext.scripts.visualize_model:main"
+test-vision-pipeline = "monty_ext.scripts.test_vision_pipeline:main"
+run-cnn-experiment = "monty_ext.scripts.run_cnn_experiment:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

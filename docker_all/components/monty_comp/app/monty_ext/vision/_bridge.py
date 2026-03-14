@@ -112,12 +112,17 @@ class VisionBridge:
             self._proc.stdin.write(line)
             self._proc.stdin.flush()
 
-            resp_line = self._proc.stdout.readline()
-            if not resp_line:
-                raise RuntimeError(
-                    "Vision subprocess returned empty response. "
-                    "Check /var/log/monty/vision_server.log for details."
-                )
+            while True:
+                resp_line = self._proc.stdout.readline()
+                if not resp_line:
+                    raise RuntimeError(
+                        "Vision subprocess returned empty response. "
+                        "Check /var/log/monty/vision_server.log for details."
+                    )
+                resp_line = resp_line.strip()
+                if not resp_line:
+                    continue
+                break
             resp = json.loads(resp_line)
             if not resp.get("ok", False):
                 raise RuntimeError(
@@ -137,23 +142,92 @@ class VisionBridge:
         self._send({"cmd": "load_vggt"})
         logger.info("VGGT loaded in vision subprocess")
 
-    def segment(self, rgb: np.ndarray) -> np.ndarray:
+    def load_gdino(self) -> bool:
+        """Load Grounding DINO.  Returns True if available."""
+        resp = self._send({"cmd": "load_gdino"})
+        avail = resp.get("available", False)
+        logger.info("Grounding DINO loaded (available=%s)", avail)
+        return avail
+
+    def detect_gdino(
+        self, rgb: np.ndarray, text_prompt: str,
+    ) -> dict:
+        """Run GDINO detection on a single frame.
+
+        Returns:
+            dict with ``"box"`` (list or None) and ``"confidence"`` (float).
+        """
+        img_path = os.path.join(_SHM, "vb_frame.npy")
+        np.save(img_path, rgb)
+        resp = self._send({
+            "cmd": "detect_gdino",
+            "image": img_path,
+            "text_prompt": text_prompt,
+        })
+        return {"box": resp.get("box"), "confidence": resp.get("confidence", 0.0)}
+
+    def segment(
+        self, rgb: np.ndarray, text_prompt: Optional[str] = None
+    ) -> np.ndarray:
         """Segment the foreground object from an RGB frame.
 
         Args:
             rgb: (H, W, 3) uint8 array.
+            text_prompt: Optional text description for guided segmentation.
 
         Returns:
             (H, W) bool mask.
         """
         img_path = os.path.join(_SHM, "vb_frame.npy")
         np.save(img_path, rgb)
-        resp = self._send({"cmd": "segment", "image": img_path})
+        msg = {"cmd": "segment", "image": img_path}
+        if text_prompt:
+            msg["text_prompt"] = text_prompt
+        resp = self._send(msg)
         return np.load(resp["mask"])
 
-    def segment_batch(self, frames: List[np.ndarray]) -> List[np.ndarray]:
+    def segment_batch(
+        self,
+        frames: List[np.ndarray],
+        text_prompt: Optional[str] = None,
+    ) -> List[np.ndarray]:
         """Segment each frame independently."""
-        return [self.segment(f) for f in frames]
+        return [self.segment(f, text_prompt=text_prompt) for f in frames]
+
+    def segment_video(
+        self,
+        frames_dir: str,
+        frame_indices: Optional[List[int]] = None,
+        text_prompt: Optional[str] = None,
+        debug_vis_dir: str = "",
+        reanchor_interval: int = 30,
+    ) -> List[np.ndarray]:
+        """Segment frames using SAM2 VideoPredictor with temporal tracking.
+
+        Args:
+            frames_dir: Directory containing extracted JPEG frames.
+            frame_indices: Which frame indices to use (subsampled).
+                If None, uses all frames in the directory.
+            text_prompt: Object description for Grounding DINO.
+            debug_vis_dir: Directory for debug visualizations.
+            reanchor_interval: Check GDINO every N frames for drift.
+
+        Returns:
+            List of (H, W) bool masks, one per selected frame.
+        """
+        msg = {
+            "cmd": "segment_video",
+            "frames_dir": frames_dir,
+            "text_prompt": text_prompt or "",
+            "debug_vis_dir": debug_vis_dir,
+            "reanchor_interval": reanchor_interval,
+        }
+        if frame_indices is not None:
+            msg["frame_indices"] = frame_indices
+
+        resp = self._send(msg)
+        stacked = np.load(resp["masks"])
+        return [stacked[i] for i in range(stacked.shape[0])]
 
     def vggt_batch(
         self,

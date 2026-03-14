@@ -26,6 +26,15 @@ Here is my vision:
 ################## real ##################
 USE_BT=true USE_MONTY=true ./scripts/real_up.sh
 
+# record video
+/home/lq/miniconda3/envs/tbp.monty/bin/record-scan --object cup
+
+# monty start learning
+docker compose --profile monty up --build -d monty_comp
+docker compose exec monty_comp conda run --no-capture-output -n tbp.monty turntable-learn --object yellow_cube --description "yellow cube on black turntable"
+docker compose exec monty_comp conda run --no-capture-output -n tbp.monty turntable-learn --object girl_action_figure --description "girl action figure on black turntable"
+docker compose exec monty_comp conda run --no-capture-output -n tbp.monty turntable-learn --object red_box --description "red box on black turntable"
+
 # 100-cycle BT test (live)
 docker compose exec ros2_comp bash -l -c "ros2 run monty_demo bt_pick_place_test -n 100"
 

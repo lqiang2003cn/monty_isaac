@@ -66,7 +66,9 @@ RUN conda run --no-capture-output -n tbp.monty \
 RUN conda run --no-capture-output -n tbp.monty \
     pip install --no-build-isolation \
         opencv-python-headless \
-        pyzmq
+        pyrealsense2 \
+        pyzmq \
+        plotly
 
 # ---------------------------------------------------------------------------
 # Vision env — SAM2 + VGGT need modern torch (>=2.5) and Python 3.11.
@@ -86,6 +88,9 @@ RUN conda run --no-capture-output -n vision \
     pip install --no-build-isolation \
         "sam-2 @ git+https://github.com/facebookresearch/sam2.git" \
         opencv-python-headless
+
+RUN conda run --no-capture-output -n vision \
+    pip install --no-build-isolation groundingdino-py
 
 RUN conda run --no-capture-output -n vision \
     pip install --no-build-isolation \

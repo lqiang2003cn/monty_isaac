@@ -1,0 +1,76 @@
+---
+description: "Safety, motion tuning, gripper geometry, BT, logging, env management, and deployment constraints for the X3plus platform"
+alwaysApply: true
+---
+
+# Project Constraints
+
+## 1. Safety Lockouts
+
+- `dry_run` must block at **every layer** independently (service callback, planner, trajectory-send).
+- Never hardcode `execute=True` in timers/callbacks/startup. Test scripts: `dry_run=True` first, clean up in `finally`.
+- After `SetParameters`, verify `future.done()` + `response is not None` + `result.successful`. Abort on failure.
+- Log every execute/plan-only decision to file with `_flog.critical()`.
+
+## 2. Bridge Hardware-Feedback Safety
+
+- Deviation thresholds: 5° warn (file), 10° critical (console), 30° hard lockout (permanent until restart).
+- Lockout after 3 consecutive deviation reads or 5 consecutive invalid position reads.
+- Never fabricate positions for missing servo data — hold last good value; skip publish if none.
+- Serial driver: validate pulse > 0 AND within min/max range, then validate angle within joint ranges. Return -1 for invalid.
+
+## 3. Limits, E-Stop & Error Handling
+
+- Joint limits from YAML, enforced by **both** planner and controller. Floor: `z_wrist >= 0.017m`.
+- Cap TCP speed (250 mm/s hand-guiding, lower in teleop). Validate every waypoint against workspace boundaries.
+- Hardware e-stop required. Bridge heartbeat watchdog (500 ms → Cat 1 stop).
+- On failure: halt → log → operator ack. No auto-retry without full state re-validation.
+
+## 4. Motion Tuning
+
+Pipeline: `MoveIt (vel_scale × joint_limits) → JTC (splines) → ZMQ bridge → Orin serial → MCU servos (run_time)`
+
+- update_rate: 50 Hz, state_publish_hz: 20 Hz, open_loop_control: true, interpolation: splines, run_time: 100 ms.
+- Joint vel ceiling: j1–j4 = 2.0 rad/s, j5 = 4.0 rad/s. Accel matches vel values.
+- Velocity scales: general 0.3, homing 0.15, precision 0.1–0.2, fast transit 0.5–0.7 (never > 0.7).
+- Open-loop + rate mismatch (50 Hz vs 20 Hz) is OK. If `open_loop_control: false`, rates **must** match.
+
+## 5. Gripper Geometry & Pick-Place
+
+- Fingertip is lowest point when gripper faces down. FINGERTIP_BELOW_WRIST = 0.012 m.
+- PITCH_DOWN = -π/2, BLOCK_HEIGHT = 0.03m, GRASP_DEPTH = 0.015m, APPROACH_HEIGHT = 0.04m.
+- GRIP_OPEN = 0.0 rad, GRIP_CLOSED = -1.3 rad. Cartesian: speed 0.03 m/s, step 0.01m.
+- 5-DOF analytical IK (pitch fixed -π/2). Wrist offset L3X = 0.00215m is critical. Use nearest solution to avoid elbow flips.
+- 5 validation layers: bounding box → base collision AABB → floor clearance → analytical IK → descent path (1 cm waypoints).
+- Planner tracks virtual arm/grip positions for dry-run chaining and post-execution continuity.
+
+## 6. BehaviorTree Architecture
+
+- Trees: `pick.xml` (5-step), `place.xml` (4-step), `pick_and_place.xml` (Pick→Place, no go_home between).
+- **`shared_from_this()`** in two-phase init — never `shared_ptr(this, no-op-deleter)`.
+- **`_autoremap="true"`** on all SubTree nodes. **`server_timeout = 60000ms`**.
+- Default params must be IK-reachable (`block_x=0.23`, not 0.2).
+- Known issue: `populate_blackboard` ignores `place_qx/qy/qz/qw` in pick_and_place mode.
+
+## 7. Logging
+
+- Two-tier: console (`get_logger()`) for milestones, file (`_flog`) for debug. Never `print()` in ROS nodes.
+- LOG_DIR = `/var/log/monty/` bind-mounted to `./logs/<RUN_ID>/`. Rotation: 5 MB × 3 backups.
+- Throttle high-freq logs (`counter % 50`). Safety decisions → `_flog.critical()`.
+
+## 8. Python Environment Management
+
+- **mamba** for install/create/update; **conda** only for activate/deactivate. Never venv/virtualenv.
+- Shared cache: `/home/lqtech/conda_pkg_cache`. Check `mamba env list` before creating.
+
+## 9. Rebuild & Deployment
+
+- Simulation first (Isaac Sim), always. First real deploy: 25% velocity, constrained workspace, two-person rule.
+
+| Change type | Verify |
+|---|---|
+| Python source | Entry point in `setup.py`; imports resolve; no syntax errors |
+| Launch files | package/executable match console_scripts; data_files listed |
+| Config YAML/SRDF/xacro | Listed in `setup.py` data_files; keys match node expectations |
+| Dockerfile | apt packages in both stages; COPY relative to `docker_all/` |
+| docker-compose.yml | `command:` passes all launch args; env vars have defaults |
