@@ -1,3 +1,9 @@
 [submodule "docker_all/third_party/tbp.monty"]
 	path = docker_all/third_party/tbp.monty
 	url = https://github.com/thousandbrainsproject/tbp.monty.git
+[submodule "docker_all/components/vision_comp/sam2_src"]
+	path = docker_all/components/vision_comp/sam2_src
+	url = https://github.com/facebookresearch/sam2.git
+[submodule "docker_all/components/vision_comp/groundingdino_src"]
+	path = docker_all/components/vision_comp/groundingdino_src
+	url = https://github.com/IDEA-Research/GroundingDINO.git
