@@ -1,12 +1,12 @@
-"""Camera poses + depth maps from RGB via VGGT, running in the ``vision`` subprocess.
+"""Camera poses + depth maps from RGB via VGGT, running in the vision_comp container.
 
 VGGT is a feed-forward transformer that takes 1-to-N RGB images and outputs
 camera poses and per-frame dense depth maps in a single forward pass.  This
 eliminates all calibration.
 
-The actual VGGT model runs in the ``vision`` conda env (Python 3.11 +
-torch 2.5) via the ``VisionBridge`` subprocess.  This wrapper runs in
-the ``tbp.monty`` env (Python 3.8 + torch 1.13).
+The actual VGGT model runs in vision_comp (Python 3.10 + torch 2.5)
+via a TCP JSON-lines server.  This wrapper connects through
+``VisionBridge`` in monty_comp (Python 3.8 + torch 1.13).
 """
 
 from __future__ import annotations

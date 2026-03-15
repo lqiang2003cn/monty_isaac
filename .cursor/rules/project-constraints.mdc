@@ -60,11 +60,17 @@ Pipeline: `MoveIt (vel_scale × joint_limits) → JTC (splines) → ZMQ bridge �
 
 ## 8. Python Environment Management
 
-- **mamba** for install/create/update; **conda** only for activate/deactivate. Never venv/virtualenv.
-- Shared cache: `/home/lqtech/conda_pkg_cache`. Check `mamba env list` before creating.
+- **No conda inside Docker.** Docker IS the environment boundary. Use the right base image (`ubuntu:22.04`, `python:3.x-slim`, `ros:jazzy`) and pip.
+- Exception: monty_comp still uses conda for `tbp.monty` (upstream requires habitat-sim via conda-forge).
+- vision_comp uses `ubuntu:22.04` system Python 3.10 + pip. No conda.
+- **Host-side**: **mamba** for install/create/update; **conda** only for activate/deactivate.
+- Shared host cache: `/home/lqtech/conda_pkg_cache`. Check `mamba env list` before creating.
+- Docker compose uses `include` — each component has its own `compose.yml` in its directory.
+- **Single build-context:** All image builds are defined only in `docker_all/compose.yml`. Component `compose.yml` files must not contain `build:`. When adding a new component, add its `build:` block to the root `compose.yml`; never introduce a new build-context (e.g. no `build:` in component compose files).
 
 ## 9. Rebuild & Deployment
 
+- **When rebuilding a component, always reuse cache.** Use `docker compose build <service>` (or `./scripts/build_all.sh`) without `--no-cache`. Use `DOCKER_BUILDKIT=1` so cache mounts (e.g. pip in vision_comp) are used. Only use `--no-cache` when explicitly requested for a clean rebuild.
 - Simulation first (Isaac Sim), always. First real deploy: 25% velocity, constrained workspace, two-person rule.
 
 | Change type | Verify |
@@ -72,5 +78,6 @@ Pipeline: `MoveIt (vel_scale × joint_limits) → JTC (splines) → ZMQ bridge �
 | Python source | Entry point in `setup.py`; imports resolve; no syntax errors |
 | Launch files | package/executable match console_scripts; data_files listed |
 | Config YAML/SRDF/xacro | Listed in `setup.py` data_files; keys match node expectations |
-| Dockerfile | apt packages in both stages; COPY relative to `docker_all/` |
-| docker-compose.yml | `command:` passes all launch args; env vars have defaults |
+| Dockerfile | apt packages in both stages; COPY relative to build context |
+| compose.yml | `command:` passes all launch args; env vars have defaults; no `build:` in component compose (only in root) |
+| vision_comp changes | vision_server package installs; TCP port 5570 accessible; /vision_shm mounted |

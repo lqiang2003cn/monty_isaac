@@ -4,10 +4,11 @@ All source and Docker wiring for the monty_isaac stack live here. Each runtime c
 
 ## Layout
 
-- **components/** — One folder per Docker component. Each has a `Dockerfile` and optionally `docker-compose.fragment.yml`.
+- **components/** — One folder per Docker component. Each has a `Dockerfile` and a `compose.yml`.
   - **isaac_comp** — Isaac Sim 5.1 + ROS2 bridge (X3plus arm + gripper). Uses **shared/x3plus_isaac** (mounted at `/shared`).
   - **ros2_comp** — ROS2 workspace with `monty_demo`; runs `ros2 launch monty_demo opus_x3plus_bringup.launch.py`. Supports `mode:=isaac` (sim), `mode:=real` (USB serial), and `mode:=zmq` (remote robot via ZMQ).
   - **remote_real_x3plus** — ZMQ server + x3plus serial driver; **deploy on the robot machine** (e.g. NVIDIA Orin Nano, ARM64). Run in Docker with `--device /dev/ttyUSB0`. See `components/remote_real_x3plus/README.md` for build/run on Orin.
+  - **vision_comp** — Vision model server (SAM2, Grounding DINO). **Before first build:** `git submodule update --init --recursive` so `components/vision_comp/sam2_src` and `groundingdino_src` are populated.
   - **_template** — Scaffold for adding new components (copy, rename, implement).
 - **shared/** — **x3plus_isaac** (URDF + meshes for Isaac Sim) is the single source here; both isaac_comp and ros2_comp use it (mounted at `/shared` in Docker). Optional: `ros2/` for Fast DDS profile.
 - **scripts/** — Host scripts: `build_all.sh`, `run_compose.sh`, `copy_x3plus_from_src.sh`.
@@ -42,6 +43,8 @@ docker compose build
 docker compose up
 ```
 
+**vision_comp and large downloads:** The vision_comp build is defined once in the **root** compose (`context: components/vision_comp`) so the same context is always used from `docker_all` and the layer cache is reused. Ensure **BuildKit** is on (e.g. `DOCKER_BUILDKIT=1` in docker_all/.env) so the pip cache mount works; then `docker compose build vision_comp` from docker_all should not re-download torch after the first build.
+
 **Remote ZMQ on Orin Nano (ARM64):** Use the wrapper script. By default it (1) **rsyncs** `docker_all/` to the Orin, (2) **builds** `remote_real_x3plus` for `linux/arm64` locally (Docker Buildx) and streams the image to the Orin (no Docker Hub pull on Orin), (3) starts the container on the Orin, (4) runs `docker compose` locally with `ROBOT_MODE=zmq`. From `docker_all` or repo root:
 
 ```bash
@@ -65,8 +68,8 @@ Optional env: `REMOTE_ORIN_REPO_PATH` (sync destination on Orin, default `~/mont
 
 1. Copy `components/_template/` to `components/<new_name>/` (e.g. `components/zmq_service/`).
 2. Implement your code in `components/<new_name>/app/` and adjust the `Dockerfile` (COPY app, set CMD/ENTRYPOINT).
-3. In `docker-compose.fragment.yml`, set the service name, build context, env, and any ports (e.g. ZMQ). Attach the service to the same network: `networks: [monty_net]`.
-4. Add that service to `docker_all/docker-compose.yml` (paste the fragment under `services:` or use Compose `include`).
+3. Create a `compose.yml` in the component directory with the service definition. Attach to network `monty_net`.
+4. Add an `include` entry in the root `docker_all/compose.yml` pointing to the new `compose.yml`.
 5. **ROS2:** Use the same `ROS_DOMAIN_ID` (and optional `shared/ros2/fastdds_profile.xml`) so the new component discovers other ROS2 nodes. **ZMQ:** Expose a port and connect from other containers to `tcp://<service_name>:<port>`.
 
 See `components/_template/README.md` for a short checklist.

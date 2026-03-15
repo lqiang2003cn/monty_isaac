@@ -7,9 +7,11 @@ Use this to verify the vision pipeline before running ``turntable-learn``.
 Depth can come from either pre-recorded RealSense D455 frames (default)
 or VGGT neural-net inference, selected with ``--depth-source``.
 
-Usage (inside monty_comp container)::
+This script runs inside the vision_comp container where the models are
+available locally — no TCP bridge needed.
 
-    conda activate tbp.monty
+Usage (inside vision_comp container)::
+
     test-vision-pipeline --object red_box
     test-vision-pipeline --object red_box --depth-source vggt
     test-vision-pipeline --object red_box --description "red box on turntable"
@@ -170,10 +172,9 @@ def test_gdino(
         (summary_dict, detections_list) where each detection entry has
         keys ``frame``, ``box`` (or None), and ``confidence``.
     """
-    from monty_ext.vision._bridge import VisionBridge
+    from vision_server import local_api as vision
 
-    bridge = VisionBridge.get()
-    bridge.load_sam2()
+    vision.load_sam2()
 
     out = output_dir / "gdino"
     out.mkdir(parents=True, exist_ok=True)
@@ -183,7 +184,7 @@ def test_gdino(
     confidences = []
 
     for i, rgb in enumerate(frames):
-        result = bridge.detect_gdino(rgb, text_prompt)
+        result = vision.detect_gdino(rgb, text_prompt)
         box = result.get("box")
         conf = result.get("confidence", 0.0)
 
@@ -245,14 +246,12 @@ def test_sam2_tracking(
 
     Returns summary dict with mask consistency stats.
     """
-    from monty_ext.vision.sam2_segmenter import SAM2Segmenter
-
-    segmenter = SAM2Segmenter()
+    from vision_server import local_api as vision
 
     out = output_dir / "sam2_tracked"
     out.mkdir(parents=True, exist_ok=True)
 
-    masks = segmenter.segment_video(
+    masks = vision.segment_video(
         frames_dir=frames_dir,
         frame_indices=frame_indices,
         text_prompt=text_prompt,
@@ -545,9 +544,7 @@ def test_vggt(
 
     Returns summary dict with pose/depth quality stats.
     """
-    from monty_ext.vision.vggt_provider import VGGTProvider
-
-    vggt = VGGTProvider()
+    from vision_server import local_api as vision
 
     out = output_dir / "vggt"
     out.mkdir(parents=True, exist_ok=True)
@@ -564,7 +561,7 @@ def test_vggt(
         batch_frames = frames[start:end]
         batch_masks = masks[start:end]
 
-        result = vggt.process_batch(batch_frames, masks=batch_masks)
+        result = vision.vggt_batch(batch_frames, masks=batch_masks)
 
         if batch_idx == 0:
             all_extrinsics[start:end] = result.extrinsics

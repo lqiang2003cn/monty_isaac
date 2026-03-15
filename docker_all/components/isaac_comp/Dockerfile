@@ -3,8 +3,11 @@
 # Build context: docker_all/  (docker compose build from docker_all).
 # URDF is generated from the single-source xacro at build time (no manual step).
 # Meshes are mounted at runtime from shared/x3plus_isaac/meshes/.
+#
+# Base image: pinned by digest so the FROM layer is stable and cached — no re-download
+# on rebuild. Override with build-arg to use a different image/digest.
 
-ARG ISAAC_BASE=nvcr.io/nvidia/isaac-sim:5.1.0
+ARG ISAAC_BASE=nvcr.io/nvidia/isaac-sim:5.1.0@sha256:f3563cb2ba0c18af0b2fb321360dcb73a917b899f879e3213623d6bee484fa54
 
 # ---------------------------------------------------------------------------
 # Stage 1 — generate plain Isaac URDF from the single-source xacro

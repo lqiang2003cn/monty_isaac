@@ -1,0 +1,30 @@
+# Build is defined in docker_all/compose.yml (single build-context).
+services:
+  vision_comp:
+    image: monty_vision_comp:latest
+    profiles: ["monty"]
+    tty: true
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    environment:
+      PYTHONUNBUFFERED: "1"
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: all
+      MODEL_CACHE_DIR: /models
+      HF_HOME: /models/huggingface
+      TORCH_HOME: /models/torch
+      VISION_PORT: "5570"
+      VISION_SHM: /vision_shm
+    command: python3 -m vision_server
+    volumes:
+      - ${MODEL_CACHE:-../../models}:/models
+      - vision_shm:/vision_shm
+      - ${MONTY_DATA:-../../data/monty}:/data
+      - ../../logs/${RUN_ID:-current}:/var/log/monty
+    networks:
+      - monty_net

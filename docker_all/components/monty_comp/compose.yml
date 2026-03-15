@@ -1,0 +1,48 @@
+# Build is defined in docker_all/compose.yml (single build-context).
+services:
+  monty_comp:
+    image: monty_tbp_comp:latest
+    profiles: ["monty"]
+    tty: true
+    stdin_open: true
+    privileged: true
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    environment:
+      PYTHONUNBUFFERED: "1"
+      DISPLAY: ${DISPLAY}
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: all
+      MONTY_DATA: /data
+      MONTY_LOGS: /results
+      MONTY_MODELS: /results/pretrained_models
+      MODEL_CACHE_DIR: /models
+      HF_HOME: /models/huggingface
+      TORCH_HOME: /models/torch
+      USE_CAMERA: ${USE_CAMERA:-false}
+      SCAN_DIR: /data/scans
+      VISION_HOST: vision_comp
+      VISION_PORT: "5570"
+      VISION_SHM: /vision_shm
+    command: >-
+      bash -c "conda run --no-capture-output -n tbp.monty turntable-scan"
+    ports:
+      - "5560:5560"
+    volumes:
+      - /dev:/dev
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - /run/udev:/run/udev:ro
+      - ${MONTY_DATA:-../../data/monty}:/data
+      - ${MONTY_RESULTS:-../../data/monty_results}:/results
+      - ../../logs/${RUN_ID:-current}:/var/log/monty
+      - ${MODEL_CACHE:-../../models}:/models
+      - vision_shm:/vision_shm
+    depends_on:
+      - vision_comp
+    networks:
+      - monty_net

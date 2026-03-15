@@ -293,7 +293,7 @@ fi
 if [[ "${USE_MONTY}" == "true" ]]; then
   echo "[real_up] Monty enabled. monty_comp will start alongside ros2_comp."
   echo "[real_up]   Run experiments: docker compose exec monty_comp bash"
-  echo "[real_up]   Then inside:    conda activate tbp.monty && python -m monty_ext ..."
+  echo "[real_up]   Then inside:    conda run -n tbp.monty python -m monty_ext ..."
   mkdir -p "$DOCKER_ALL/data/monty" "$DOCKER_ALL/data/monty_results"
   COMPOSE_ARGS+=(--profile monty)
 fi

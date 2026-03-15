@@ -1,14 +1,16 @@
-"""Subprocess bridge to the ``vision`` conda env.
+"""TCP bridge to the vision_comp container.
 
 The ``tbp.monty`` env uses Python 3.8 + torch 1.13; SAM2/VGGT need
-Python 3.11 + torch 2.5.  This module spawns a long-running subprocess
-in the ``vision`` env and communicates via JSON-lines on stdin/stdout,
-with binary data (images, masks, depths) exchanged as numpy files on
-/dev/shm for near-zero-copy speed.
+Python 3.10 + torch 2.5.  The vision models run in a separate container
+(vision_comp) as a TCP JSON-lines server.  This module connects to that
+server and provides a high-level API.
+
+Binary data (images, masks, depths) is exchanged as numpy files on a
+shared tmpfs volume (/vision_shm) for near-zero-copy speed.
 
 Usage::
 
-    bridge = VisionBridge.get()       # singleton, starts subprocess on first call
+    bridge = VisionBridge.get()       # singleton, connects on first call
     mask = bridge.segment(rgb_array)
     result = bridge.vggt_batch(rgb_list, mask_list)
     bridge.shutdown()                 # optional — cleaned up at exit
@@ -20,8 +22,9 @@ import atexit
 import json
 import logging
 import os
-import subprocess
+import socket
 import threading
+import time
 from dataclasses import dataclass
 from typing import List, Optional
 
@@ -29,11 +32,13 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-_SHM = "/dev/shm"
-_CONDA_RUN = ["conda", "run", "--no-capture-output", "-n", "vision", "python", "-m", "monty_ext.vision._server"]
+_SHM = os.environ.get("VISION_SHM", "/vision_shm")
 
 _instance: Optional["VisionBridge"] = None
 _lock = threading.Lock()
+
+_CONNECT_RETRIES = 30
+_CONNECT_DELAY = 2.0
 
 
 @dataclass
@@ -45,21 +50,23 @@ class VGGTResult:
 
 
 class VisionBridge:
-    """Manages the subprocess running ``_server.py`` in the vision env."""
+    """Manages the TCP connection to the vision_comp server."""
 
     def __init__(self):
-        self._proc: Optional[subprocess.Popen] = None
+        self._sock: Optional[socket.socket] = None
+        self._rfile = None
+        self._wfile = None
         self._call_lock = threading.Lock()
 
     @classmethod
     def get(cls) -> "VisionBridge":
-        """Return the singleton bridge (starts subprocess on first call)."""
+        """Return the singleton bridge (connects on first call)."""
         global _instance
         if _instance is None:
             with _lock:
                 if _instance is None:
                     _instance = cls()
-                    _instance._start()
+                    _instance._connect()
                     atexit.register(_instance.shutdown)
         return _instance
 
@@ -67,38 +74,52 @@ class VisionBridge:
     # Lifecycle
     # ------------------------------------------------------------------
 
-    def _start(self) -> None:
-        logger.info("Starting vision subprocess: %s", " ".join(_CONDA_RUN))
-        log_path = os.path.join(
-            os.environ.get("LOG_DIR", "/var/log/monty"), "vision_server.log"
-        )
-        os.makedirs(os.path.dirname(log_path), exist_ok=True)
-        self._stderr_file = open(log_path, "a")
-        self._proc = subprocess.Popen(
-            _CONDA_RUN,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=self._stderr_file,
-            text=True,
-            bufsize=1,
-        )
-        logger.info("Vision subprocess started (pid=%d)", self._proc.pid)
+    def _connect(self) -> None:
+        host = os.environ.get("VISION_HOST", "vision_comp")
+        port = int(os.environ.get("VISION_PORT", "5570"))
+        logger.info("Connecting to vision server at %s:%d ...", host, port)
+
+        for attempt in range(1, _CONNECT_RETRIES + 1):
+            try:
+                self._sock = socket.create_connection((host, port), timeout=30)
+                self._rfile = self._sock.makefile("r", buffering=1)
+                self._wfile = self._sock.makefile("w", buffering=1)
+                logger.info("Connected to vision server at %s:%d", host, port)
+                return
+            except (ConnectionRefusedError, OSError) as e:
+                if attempt < _CONNECT_RETRIES:
+                    logger.warning(
+                        "Vision server not ready (attempt %d/%d): %s",
+                        attempt, _CONNECT_RETRIES, e,
+                    )
+                    time.sleep(_CONNECT_DELAY)
+                else:
+                    raise RuntimeError(
+                        f"Cannot connect to vision server at {host}:{port} "
+                        f"after {_CONNECT_RETRIES} attempts"
+                    ) from e
 
     def shutdown(self) -> None:
-        if self._proc is not None and self._proc.poll() is None:
+        if self._sock is not None:
             try:
                 self._send({"cmd": "shutdown"})
             except Exception:
                 pass
-            self._proc.terminate()
-            self._proc.wait(timeout=5)
-            logger.info("Vision subprocess terminated")
-        self._proc = None
+            try:
+                self._rfile.close()
+                self._wfile.close()
+                self._sock.close()
+            except Exception:
+                pass
+            logger.info("Vision bridge disconnected")
+        self._sock = None
+        self._rfile = None
+        self._wfile = None
 
-    def _ensure_alive(self) -> None:
-        if self._proc is None or self._proc.poll() is not None:
-            logger.warning("Vision subprocess died, restarting ...")
-            self._start()
+    def _ensure_connected(self) -> None:
+        if self._sock is None:
+            logger.warning("Vision bridge not connected, reconnecting ...")
+            self._connect()
 
     # ------------------------------------------------------------------
     # Low-level IPC
@@ -107,17 +128,23 @@ class VisionBridge:
     def _send(self, msg: dict) -> dict:
         """Send a JSON command and wait for the JSON response."""
         with self._call_lock:
-            self._ensure_alive()
+            self._ensure_connected()
             line = json.dumps(msg) + "\n"
-            self._proc.stdin.write(line)
-            self._proc.stdin.flush()
+            try:
+                self._wfile.write(line)
+                self._wfile.flush()
+            except (BrokenPipeError, OSError):
+                self._sock = None
+                self._ensure_connected()
+                self._wfile.write(line)
+                self._wfile.flush()
 
             while True:
-                resp_line = self._proc.stdout.readline()
+                resp_line = self._rfile.readline()
                 if not resp_line:
                     raise RuntimeError(
-                        "Vision subprocess returned empty response. "
-                        "Check /var/log/monty/vision_server.log for details."
+                        "Vision server returned empty response. "
+                        "Check vision_comp container logs."
                     )
                 resp_line = resp_line.strip()
                 if not resp_line:
@@ -126,7 +153,7 @@ class VisionBridge:
             resp = json.loads(resp_line)
             if not resp.get("ok", False):
                 raise RuntimeError(
-                    f"Vision subprocess error: {resp.get('error', 'unknown')}"
+                    f"Vision server error: {resp.get('error', 'unknown')}"
                 )
             return resp
 
@@ -136,11 +163,11 @@ class VisionBridge:
 
     def load_sam2(self) -> None:
         self._send({"cmd": "load_sam2"})
-        logger.info("SAM2 loaded in vision subprocess")
+        logger.info("SAM2 loaded in vision server")
 
     def load_vggt(self) -> None:
         self._send({"cmd": "load_vggt"})
-        logger.info("VGGT loaded in vision subprocess")
+        logger.info("VGGT loaded in vision server")
 
     def load_gdino(self) -> bool:
         """Load Grounding DINO.  Returns True if available."""

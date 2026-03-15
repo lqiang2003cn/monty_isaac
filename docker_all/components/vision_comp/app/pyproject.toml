@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vision_server"
+version = "0.1.0"
+description = "Vision model server — SAM2, VGGT, Grounding DINO over TCP JSON-lines"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+record-scan = "vision_server.scripts.record_scan:main"
+test-vision-pipeline = "vision_server.scripts.test_vision_pipeline:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["vision_server*"]

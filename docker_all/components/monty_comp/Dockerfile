@@ -6,6 +6,9 @@
 #   1. conda-env  — creates the tbp.monty conda environment (heavy, cached)
 #   2. runtime    — installs tbp.monty + monty_ext into the env
 #
+# Vision models (SAM2, VGGT, GDINO) run in a separate container (vision_comp).
+# monty_ext._bridge connects to vision_comp via TCP.
+#
 # tbp.monty is a git submodule at third_party/tbp.monty (upstream, read-only).
 # monty_ext is our extension package at components/monty_comp/app/monty_ext.
 
@@ -70,43 +73,13 @@ RUN conda run --no-capture-output -n tbp.monty \
         pyzmq \
         plotly
 
-# ---------------------------------------------------------------------------
-# Vision env — SAM2 + VGGT need modern torch (>=2.5) and Python 3.11.
-# tbp.monty is pinned to torch 1.13 + torch-geometric, so they cannot
-# coexist.  The vision env runs as a subprocess server; the tbp.monty
-# env communicates via JSON-lines + numpy files on /dev/shm.
-# ---------------------------------------------------------------------------
-RUN conda create -n vision python=3.11 -y \
-    && conda clean -afy
-
-RUN conda run --no-capture-output -n vision \
-    pip install \
-        torch==2.5.1 torchvision==0.20.1 \
-        --index-url https://download.pytorch.org/whl/cu121
-
-RUN conda run --no-capture-output -n vision \
-    pip install --no-build-isolation \
-        "sam-2 @ git+https://github.com/facebookresearch/sam2.git" \
-        opencv-python-headless
-
-RUN conda run --no-capture-output -n vision \
-    pip install --no-build-isolation groundingdino-py
-
-RUN conda run --no-capture-output -n vision \
-    pip install --no-build-isolation \
-        "vggt @ git+https://github.com/facebookresearch/vggt.git"
-
 # Copy and install our extension package (lightweight, fast rebuild).
 COPY components/monty_comp/app /opt/monty_ext_pkg
 RUN conda run --no-capture-output -n tbp.monty \
     pip install --no-deps /opt/monty_ext_pkg
-# Also install in vision env so _server.py is importable via subprocess.
-RUN conda run --no-capture-output -n vision \
-    pip install --no-deps /opt/monty_ext_pkg
 
 # Monty data and results directories (bind-mounted at runtime)
-# /models caches downloaded model weights (SAM2, VGGT) across container restarts.
-RUN mkdir -p /data /results /var/log/monty /models
+RUN mkdir -p /data /results /var/log/monty /models /vision_shm
 
 # Activate the conda env in every interactive shell session
 RUN conda init bash \

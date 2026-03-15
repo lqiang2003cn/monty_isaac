@@ -1,9 +1,8 @@
-# Fragment for isaac_comp. Merge into docker_all/docker-compose.yml or include as needed.
+# Build is defined in docker_all/compose.yml (single build-context).
+services:
   isaac_comp:
-    build:
-      context: .
-      dockerfile: components/isaac_comp/Dockerfile
     image: monty_isaac_comp:latest
+    profiles: ["sim"]
     deploy:
       resources:
         reservations:
@@ -11,13 +10,18 @@
             - driver: nvidia
               count: all
               capabilities: [gpu]
+    tty: true
     environment:
+      PYTHONUNBUFFERED: "1"
       DISPLAY: ${DISPLAY}
       ISAAC_HEADLESS: ${ISAAC_HEADLESS:-0}
       ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
       RMW_IMPLEMENTATION: rmw_fastrtps_cpp
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
-      - ./shared:/shared:ro
+      - ../../shared/x3plus_isaac/meshes:/shared/x3plus_isaac/meshes:ro
+      - ../../shared/x3plus_config:/shared/x3plus_config:ro
+      - ../../sim_videos:/sim_videos
+      - ./app:/app:ro
     networks:
       - monty_net

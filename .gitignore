@@ -44,5 +44,12 @@ docker_all/.env
 # Monty data and results (large, downloaded at runtime)
 docker_all/data/
 
+# Model checkpoint cache (SAM2, VGGT, GDINO — bind-mounted into containers)
+docker_all/models/
+models/
+
 # Reference repos (cloned for reading, not part of this project)
 docker_all/third_party/everything_is_awesome/
+
+# Vision comp: nested git repo, provide locally or add as submodule
+docker_all/components/vision_comp/pyorbbecsdk_src/

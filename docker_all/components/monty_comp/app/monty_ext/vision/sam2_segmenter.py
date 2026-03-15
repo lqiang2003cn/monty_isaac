@@ -1,13 +1,13 @@
-"""Object segmentation via SAM2, running in the ``vision`` subprocess.
+"""Object segmentation via SAM2, running in the vision_comp container.
 
 For turntable scanning, the object is the only foreground item on the
 turntable.  SAM2's automatic mask generator selects the dominant
 non-background mask.  When a ``text_prompt`` is supplied, Grounding DINO
 generates a bounding box and SAM2's image predictor refines it into a mask.
 
-The actual SAM2 model runs in the ``vision`` conda env (Python 3.11 +
-torch 2.5) via the ``VisionBridge`` subprocess.  This wrapper runs in
-the ``tbp.monty`` env (Python 3.8 + torch 1.13).
+The actual SAM2 model runs in vision_comp (Python 3.10 + torch 2.5)
+via a TCP JSON-lines server.  This wrapper connects through
+``VisionBridge`` in monty_comp (Python 3.8 + torch 1.13).
 """
 
 from __future__ import annotations

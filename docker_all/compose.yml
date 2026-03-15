@@ -1,0 +1,49 @@
+# Root compose file — includes all components.
+# Run from docker_all:  docker compose up
+# Build:  docker compose build
+# Use --profile sim for simulation (isaac_comp + ros2_comp).
+# Use --profile monty for Monty (monty_comp + vision_comp).
+# Both stacks use the same network (monty_net) and ROS_DOMAIN_ID for ROS2 discovery.
+#
+# Real robot modes are set via ROBOT_MODE env (real=USB serial, zmq=remote Orin).
+# ZMQ on Orin: run ./scripts/real_up.sh up --build (from docker_all) so the
+# remote_real_x3plus image is built on the Orin and the container started before local compose.
+# Set REMOTE_ORIN_HOST (e.g. wheeltec@192.168.31.142) and REMOTE_ORIN_REPO_PATH if needed.
+# Monty: USE_MONTY=true ./scripts/real_up.sh  (starts monty_comp alongside ros2_comp)
+
+include:
+  - path: components/isaac_comp/compose.yml
+  - path: components/ros2_comp/compose.yml
+  - path: components/monty_comp/compose.yml
+  - path: components/vision_comp/compose.yml
+
+# Single build-context: all component builds are defined here (context = docker_all
+# unless noted). Do not add build: in component compose files. Never add new build-context.
+services:
+  isaac_comp:
+    build:
+      context: .
+      dockerfile: components/isaac_comp/Dockerfile
+  ros2_comp:
+    build:
+      context: .
+      dockerfile: components/ros2_comp/Dockerfile
+  monty_comp:
+    build:
+      context: .
+      dockerfile: components/monty_comp/Dockerfile
+  vision_comp:
+    build:
+      context: components/vision_comp
+      dockerfile: Dockerfile
+
+volumes:
+  vision_shm:
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=512m
+
+networks:
+  monty_net:
+    driver: bridge

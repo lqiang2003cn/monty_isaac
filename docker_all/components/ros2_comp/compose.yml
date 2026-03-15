@@ -1,0 +1,53 @@
+# Build is defined in docker_all/compose.yml (single build-context).
+services:
+  ros2_comp:
+    image: monty_ros2_comp:latest
+    tty: true
+    stdin_open: true
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    environment:
+      PYTHONUNBUFFERED: "1"
+      DISPLAY: ${DISPLAY}
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: all
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+      RMW_IMPLEMENTATION: rmw_fastrtps_cpp
+      ZMQ_HOST: ${ZMQ_HOST:-192.168.31.142}
+      ZMQ_PORT: ${ZMQ_PORT:-5555}
+      DEBUG_LOGS: ${DEBUG_LOGS:-false}
+      USE_BT: ${USE_BT:-false}
+      USE_CAMERA: ${USE_CAMERA:-false}
+      USE_RVIZ: ${USE_RVIZ:-false}
+      USE_MONTY: ${USE_MONTY:-false}
+    command: >-
+      ros2 launch monty_demo opus_x3plus_bringup.launch.py
+      mode:=${ROBOT_MODE:-isaac}
+      use_moveit:=${USE_MOVEIT:-false}
+      zmq_host:=${ZMQ_HOST:-192.168.31.142}
+      zmq_port:=${ZMQ_PORT:-5555}
+      debug_logs:=${DEBUG_LOGS:-false}
+      use_bt:=${USE_BT:-false}
+      use_camera:=${USE_CAMERA:-false}
+      use_rviz:=${USE_RVIZ:-false}
+      use_monty:=${USE_MONTY:-false}
+    ports:
+      - "1667:1667"
+      - "5561:5561"
+    privileged: true
+    volumes:
+      - /dev:/dev
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - /run/udev:/run/udev:ro
+      - ../../scripts:/scripts:ro
+      - ../../shared/x3plus_isaac/meshes:/shared/x3plus_isaac/meshes:ro
+      - ../../shared/x3plus_config:/shared/x3plus_config:ro
+      - ../../logs/${RUN_ID:-current}:/var/log/monty
+      - ../../sim_videos:/sim_videos
+    networks:
+      - monty_net

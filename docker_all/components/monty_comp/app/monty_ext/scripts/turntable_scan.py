@@ -18,11 +18,10 @@ Protocol (JSON over ZMQ REP socket):
     -> {"action": "stop"}
     <- {"status": "stopped"}
 
-Usage (inside container)::
+Usage (inside monty_comp container, with vision_comp running)::
 
-    conda activate tbp.monty
-    turntable-scan              # uses pyproject.toml entry point
-    python -m monty_ext.scripts.turntable_scan   # alternative
+    conda run -n tbp.monty turntable-scan
+    conda run -n tbp.monty python -m monty_ext.scripts.turntable_scan
 """
 
 from __future__ import annotations
