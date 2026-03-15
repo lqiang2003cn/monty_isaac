@@ -67,5 +67,5 @@ if [[ ${#FAILED[@]} -gt 0 ]]; then
   echo "Fix failures above (e.g. install ROS Jazzy first, then re-run this script)."
   exit 1
 fi
-echo "Prerequisites done. With Docker: from docker_all run ./scripts/build_all.sh and ./scripts/run_compose.sh. Otherwise: source /opt/ros/jazzy/setup.bash && colcon build --packages-select monty_demo && source install/setup.bash"
+echo "Prerequisites done. With Docker: from docker_all run 'docker compose build' and ./scripts/run_compose.sh. Otherwise: source /opt/ros/jazzy/setup.bash && colcon build --packages-select monty_demo && source install/setup.bash"
 echo "Please make sure to manually install Rosmaster lib before running on real robot."

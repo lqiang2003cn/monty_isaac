@@ -4,13 +4,17 @@
 # URDF is generated from the single-source xacro at build time (no manual step).
 # Meshes are mounted at runtime from shared/x3plus_isaac/meshes/.
 #
-# Base image: pinned by digest so the FROM layer is stable and cached — no re-download
-# on rebuild. Override with build-arg to use a different image/digest.
-
-ARG ISAAC_BASE=nvcr.io/nvidia/isaac-sim:5.1.0@sha256:f3563cb2ba0c18af0b2fb321360dcb73a917b899f879e3213623d6bee484fa54
+# Base image is an explicit stage (isaac-base) pinned by digest so BuildKit caches it:
+# after the first build, "FROM isaac-base" reuses that stage and does not re-pull ~7.5GB.
+# Use normal rebuilds (no --no-cache, no docker builder prune) so the cache is kept.
 
 # ---------------------------------------------------------------------------
-# Stage 1 — generate plain Isaac URDF from the single-source xacro
+# Stage 1 — Isaac base (cached after first pull; do not use --no-cache on rebuild)
+# ---------------------------------------------------------------------------
+FROM nvcr.io/nvidia/isaac-sim:5.1.0@sha256:f3563cb2ba0c18af0b2fb321360dcb73a917b899f879e3213623d6bee484fa54 AS isaac-base
+
+# ---------------------------------------------------------------------------
+# Stage 2 — generate plain Isaac URDF from the single-source xacro
 # ---------------------------------------------------------------------------
 FROM ros:jazzy AS urdf-gen
 
@@ -28,9 +32,9 @@ RUN . /opt/ros/jazzy/setup.sh \
        > /x3plus_isaac.urdf
 
 # ---------------------------------------------------------------------------
-# Stage 2 — Isaac Sim runtime
+# Stage 3 — Isaac Sim runtime (FROM internal stage so no re-pull on rebuild)
 # ---------------------------------------------------------------------------
-FROM ${ISAAC_BASE}
+FROM isaac-base
 
 LABEL maintainer="monty" \
       description="Isaac Sim 5.1 component for monty_demo"

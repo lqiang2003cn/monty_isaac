@@ -1,5 +1,5 @@
 ---
-description: "Safety, motion tuning, gripper geometry, BT, logging, env management, and deployment constraints for the X3plus platform"
+description: "Safety, motion tuning, gripper geometry, BT, logging, env management, build (compose-only), and deployment constraints for the X3plus platform"
 alwaysApply: true
 ---
 
@@ -70,7 +70,8 @@ Pipeline: `MoveIt (vel_scale × joint_limits) → JTC (splines) → ZMQ bridge �
 
 ## 9. Rebuild & Deployment
 
-- **When rebuilding a component, always reuse cache.** Use `docker compose build <service>` (or `./scripts/build_all.sh`) without `--no-cache`. Use `DOCKER_BUILDKIT=1` so cache mounts (e.g. pip in vision_comp) are used. Only use `--no-cache` when explicitly requested for a clean rebuild.
+- **All build/rebuild of components must use compose.** Use `docker compose build` or `docker compose build <service>` from the appropriate compose context (e.g. `docker_all/`). Do not use `.sh` scripts, Makefiles, or other ad-hoc build invocations for component images.
+- **When rebuilding a component, always reuse cache.** Use `docker compose build` or `docker compose build <service>` without `--no-cache`. Use `DOCKER_BUILDKIT=1` so cache mounts (e.g. pip in vision_comp) are used. Only use `--no-cache` when explicitly requested for a clean rebuild.
 - Simulation first (Isaac Sim), always. First real deploy: 25% velocity, constrained workspace, two-person rule.
 
 | Change type | Verify |

@@ -11,7 +11,7 @@ All source and Docker wiring for the monty_isaac stack live here. Each runtime c
   - **vision_comp** — Vision model server (SAM2, Grounding DINO). **Before first build:** `git submodule update --init --recursive` so `components/vision_comp/sam2_src` and `groundingdino_src` are populated.
   - **_template** — Scaffold for adding new components (copy, rename, implement).
 - **shared/** — **x3plus_isaac** (URDF + meshes for Isaac Sim) is the single source here; both isaac_comp and ros2_comp use it (mounted at `/shared` in Docker). Optional: `ros2/` for Fast DDS profile.
-- **scripts/** — Host scripts: `build_all.sh`, `run_compose.sh`, `copy_x3plus_from_src.sh`.
+- **scripts/** — Host scripts: `run_compose.sh`, `copy_x3plus_from_src.sh`. Build with compose (see below).
 
 **X3plus URDF and meshes:**
 - **shared/x3plus_isaac/** — **Single source** for Isaac Sim: `urdf/x3plus_isaac.urdf` and `meshes/`. Mounted at `/shared` for isaac_comp and ros2_comp. Use `X3PLUS_DESCRIPTION_DIR` to override (e.g. `/shared/x3plus_isaac`).
@@ -21,27 +21,14 @@ To refresh the description from the repo's `src/`, run `./scripts/copy_x3plus_fr
 
 ## Build and run
 
-From **docker_all**:
+From **docker_all** (or repo root with `cd docker_all` first):
 
 ```bash
-./scripts/build_all.sh
-./scripts/run_compose.sh
+docker compose build          # all components, or: build isaac_comp ros2_comp monty_comp vision_comp
+docker compose up             # or use ./scripts/run_compose.sh if you use that wrapper
 ```
 
-Or from the repo root:
-
-```bash
-./docker_all/scripts/build_all.sh
-./docker_all/scripts/run_compose.sh
-```
-
-Or call Docker Compose directly from `docker_all`:
-
-```bash
-cd docker_all
-docker compose build
-docker compose up
-```
+Use `DOCKER_BUILDKIT=1` so cache mounts work (e.g. in `.env`: `DOCKER_BUILDKIT=1`). To build a single component: `docker compose build <service>`.
 
 **vision_comp and large downloads:** The vision_comp build is defined once in the **root** compose (`context: components/vision_comp`) so the same context is always used from `docker_all` and the layer cache is reused. Ensure **BuildKit** is on (e.g. `DOCKER_BUILDKIT=1` in docker_all/.env) so the pip cache mount works; then `docker compose build vision_comp` from docker_all should not re-download torch after the first build.
 
