@@ -69,6 +69,8 @@ RUN cd /tmp/pyorbbecsdk && mkdir -p build && cd build \
 # ---------------------------------------------------------------------------
 COPY sam2_src /tmp/sam2_build
 COPY groundingdino_src /tmp/groundingdino_build
+COPY patches /tmp/patches
+RUN cd /tmp/groundingdino_build && patch -p1 -i /tmp/patches/groundingdino_ms_deform_attn_cpu.patch
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip3 install --no-build-isolation /tmp/sam2_build \
     && pip3 install --no-build-isolation /tmp/groundingdino_build \
