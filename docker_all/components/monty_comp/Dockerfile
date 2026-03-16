@@ -57,12 +57,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libusb-1.0-0 libopengl0 libegl1-mesa \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy tbp.monty source and install as a non-editable package.
-# Uses --no-build-isolation so pip sees the conda env's packages (numpy,
-# torch, etc.) and only installs missing pip-only deps (omegaconf, hydra,
-# pydantic, etc.).  Upstream updates: rebuild the image after
-# `git submodule update --remote`.
+# Copy tbp.monty source and apply our patches (we don't push to upstream).
+# Patches: displacement_matching (empty-edge handling), object_model (k_n guard).
 COPY third_party/tbp.monty /opt/tbp.monty
+COPY third_party/tbp.monty.diff /opt/tbp.monty.diff
+RUN cd /opt/tbp.monty && git apply /opt/tbp.monty.diff && rm /opt/tbp.monty.diff
+
+# Install tbp.monty as a non-editable package. Uses --no-build-isolation so pip
+# sees the conda env's packages (numpy, torch, etc.). Upstream updates: rebuild
+# after `git submodule update --remote` (patch will reapply).
 RUN conda run --no-capture-output -n tbp.monty \
     pip install --no-build-isolation /opt/tbp.monty
 
