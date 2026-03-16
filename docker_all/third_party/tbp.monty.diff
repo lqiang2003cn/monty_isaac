@@ -1,0 +1,56 @@
+diff --git a/src/tbp/monty/frameworks/models/displacement_matching.py b/src/tbp/monty/frameworks/models/displacement_matching.py
+index cf54d01..6537745 100644
+--- a/src/tbp/monty/frameworks/models/displacement_matching.py
++++ b/src/tbp/monty/frameworks/models/displacement_matching.py
+@@ -476,21 +476,29 @@ class DisplacementGraphMemory(GraphMemory):
+ 
+         for graph_id in self.get_memory_ids():
+             first_input_channel = self.get_input_channels_in_graph(graph_id)[0]
+-            next_possible_paths[graph_id] = np.swapaxes(
+-                self.get_graph(graph_id, first_input_channel).edge_index, 0, 1
++            graph = self.get_graph(graph_id, first_input_channel)
++            edge_index = getattr(graph, "edge_index", None)
++            edge_attr = getattr(graph, "edge_attr", None)
++            has_edges = (
++                edge_index is not None
++                and hasattr(edge_index, "numel")
++                and edge_index.numel() > 0
+             )
+-            if self.get_graph(graph_id, first_input_channel).x.dim() > 1:
+-                # Features of nodes contain more than just IDs (i.e. RGBA)
++            if has_edges:
++                next_possible_paths[graph_id] = np.swapaxes(
++                    edge_index, 0, 1
++                )
++                scale_factors[graph_id] = np.array(edge_attr[:, 0])
++            else:
++                next_possible_paths[graph_id] = np.empty((0, 2), dtype=np.int64)
++                scale_factors[graph_id] = np.empty(0)
++
++            if graph.x.dim() > 1:
+                 possible_paths[graph_id] = self.get_graph_node_ids(
+                     graph_id, first_input_channel
+                 )
+             else:
+-                possible_paths[graph_id] = np.array(
+-                    self.get_graph(graph_id, first_input_channel).x
+-                )
+-            scale_factors[graph_id] = np.array(
+-                self.get_graph(graph_id, first_input_channel).edge_attr[:, 0]
+-            )
++                possible_paths[graph_id] = np.array(graph.x)
+         return (
+             possible_matches,
+             possible_paths,
+diff --git a/src/tbp/monty/frameworks/models/object_model.py b/src/tbp/monty/frameworks/models/object_model.py
+index ed0c03d..025266c 100644
+--- a/src/tbp/monty/frameworks/models/object_model.py
++++ b/src/tbp/monty/frameworks/models/object_model.py
+@@ -307,6 +307,7 @@ class GraphObjectModel(ObjectModel):
+         if k_n is not None:
+             k_n = get_correct_k_n(k_n, num_nodes)
+ 
++        if k_n is not None:
+             scipy_graph = kneighbors_graph(
+                 locations_reduced, n_neighbors=k_n, include_self=False
+             )
