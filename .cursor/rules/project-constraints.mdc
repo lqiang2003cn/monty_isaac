@@ -1,5 +1,5 @@
 ---
-description: "Safety, motion tuning, gripper geometry, BT, logging, env management, build (compose-only), and deployment constraints for the X3plus platform"
+description: "Safety, motion tuning, gripper geometry, BT, logging, env management, build (compose-only), deployment, and Docker bind-mount output (host user) constraints for the X3plus platform"
 alwaysApply: true
 ---
 
@@ -60,6 +60,7 @@ Pipeline: `MoveIt (vel_scale × joint_limits) → JTC (splines) → ZMQ bridge �
 
 ## 8. Python Environment Management
 
+- **Always ask the user** before creating a new conda environment or adding a new Dockerfile. Do not create envs or Dockerfiles without explicit confirmation.
 - **No conda inside Docker.** Docker IS the environment boundary. Use the right base image (`ubuntu:22.04`, `python:3.x-slim`, `ros:jazzy`) and pip.
 - Exception: monty_comp still uses conda for `tbp.monty` (upstream requires habitat-sim via conda-forge).
 - vision_comp uses `ubuntu:22.04` system Python 3.10 + pip. No conda.
@@ -82,3 +83,9 @@ Pipeline: `MoveIt (vel_scale × joint_limits) → JTC (splines) → ZMQ bridge �
 | Dockerfile | apt packages in both stages; COPY relative to build context |
 | compose.yml | `command:` passes all launch args; env vars have defaults; no `build:` in component compose (only in root) |
 | vision_comp changes | vision_server package installs; TCP port 5570 accessible; /vision_shm mounted |
+
+## 10. Docker run and bind-mounted output
+
+- When running **one-off** container commands that write to bind-mounted dirs (e.g. `MONTY_RESULTS` → `docker_all/data/monty_results`, viz HTML/PNG, pretrained `model.pt`), run the container as the **host user** so created files are readable (e.g. open HTML in browser).
+- Use **`-u "$(id -u):$(id -g)"`** (or `user:` in compose for that service) when invoking `docker compose run` for scripts that write under `/results`, `/data`, or other bind mounts that the host user needs to read.
+- Example: `docker compose --profile monty run --rm -u "$(id -u):$(id -g)" monty_comp bash -c "conda run -n tbp.monty visualize-learned-models ..."` so that `banana_explore.html` and similar outputs are owned by the host user and openable without permission errors.

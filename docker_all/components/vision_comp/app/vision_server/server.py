@@ -142,9 +142,13 @@ def _load_sam2() -> None:
 
     ckpt_file = _get_sam2_ckpt()
 
+    import torch
+    _device = "cuda" if torch.cuda.is_available() else "cpu"
+    if _device == "cpu":
+        _log("WARNING: CUDA not available — SAM2 will run on CPU (slow).")
     _log("Loading SAM2 ...")
     with _suppress_stdout():
-        _sam2_model = build_sam2(_SAM2_CONFIG, ckpt_file, device="cuda")
+        _sam2_model = build_sam2(_SAM2_CONFIG, ckpt_file, device=_device)
         _sam2_generator = SAM2AutomaticMaskGenerator(
             model=_sam2_model,
             points_per_side=32,
@@ -152,7 +156,7 @@ def _load_sam2() -> None:
             stability_score_thresh=0.85,
         )
         _sam2_predictor = SAM2ImagePredictor(_sam2_model)
-    _log("SAM2 loaded")
+    _log(f"SAM2 loaded (device: {_device})")
 
 
 def _load_sam2_video_predictor() -> None:
@@ -162,13 +166,15 @@ def _load_sam2_video_predictor() -> None:
 
     from sam2.build_sam import build_sam2_video_predictor
 
+    import torch
+    _device = "cuda" if torch.cuda.is_available() else "cpu"
     ckpt_file = _get_sam2_ckpt()
     _log("Loading SAM2 VideoPredictor ...")
     with _suppress_stdout():
         _sam2_video_predictor = build_sam2_video_predictor(
-            _SAM2_CONFIG, ckpt_file, device="cuda",
+            _SAM2_CONFIG, ckpt_file, device=_device,
         )
-    _log("SAM2 VideoPredictor loaded")
+    _log(f"SAM2 VideoPredictor loaded (device: {_device})")
 
 
 def _load_vggt() -> None:
@@ -272,10 +278,24 @@ def _load_gdino():
 
     ckpt_path = _get_gdino_ckpt()
 
+    import torch
+    _device = "cuda" if torch.cuda.is_available() else "cpu"
+    if _device == "cpu":
+        _log("WARNING: CUDA not available — Grounding DINO will run on CPU (slow).")
+
     try:
         with _suppress_stdout():
-            _gdino_model = load_model(config_path, ckpt_path)
-        _log("Grounding DINO loaded")
+            # Explicit device so model and inference run on GPU when available
+            _gdino_model = load_model(config_path, ckpt_path, device=_device)
+        if _gdino_model is not None and _device == "cuda":
+            _gdino_model = _gdino_model.cuda()
+        # Refuse to use GDINO if C++ ops didn't load — avoid running silently slow on CPU.
+        from groundingdino.models.GroundingDINO import ms_deform_attn
+        if not getattr(ms_deform_attn, "_HAS_C_OPS", True):
+            _log("CRITICAL: Grounding DINO C++ ops not loaded — refusing to use GDINO (would run silently slow). Use center-point fallback.")
+            _gdino_model = None
+            return
+        _log(f"Grounding DINO loaded (device: {next(_gdino_model.parameters()).device})")
     except Exception as e:
         _log(f"Grounding DINO load failed: {e}")
 

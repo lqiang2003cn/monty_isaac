@@ -12,7 +12,7 @@ Usage::
     record-scan --object toy --no-preview --duration 10
     record-scan --object toy --no-depth
 
-Press Enter or Ctrl+C to stop recording.
+Runs for N seconds (default 15) then auto-stops and saves. Ctrl+C is ignored.
 """
 
 from __future__ import annotations
@@ -21,7 +21,6 @@ import argparse
 import json
 import os
 import signal
-import sys
 import threading
 import time
 from datetime import datetime, timezone
@@ -262,7 +261,7 @@ def _record_orbbec(
     width: int, height: int, fps: int,
     preview: bool,
     record_depth: bool,
-    duration: float | None,
+    duration: float,
     depth_min_m: float,
     depth_max_m: float,
 ) -> tuple[int, float, dict]:
@@ -333,10 +332,7 @@ def _record_orbbec(
     depth_label = " + depth" if record_depth else ""
     print(f"Recording {object_name} at {actual_w}x{actual_h} "
           f"@ {actual_fps} fps{depth_label}  [{camera_tag}]")
-    if duration is not None:
-        print(f"Recording for {duration}s (Ctrl+C to stop early)...")
-    else:
-        print("Press Enter or Ctrl+C to stop recording...")
+    print(f"Recording for {duration}s (Ctrl+C ignored, auto-stop)...")
 
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     writer = cv2.VideoWriter(str(video_path), fourcc, actual_fps,
@@ -348,25 +344,14 @@ def _record_orbbec(
     frame_count = 0
     start_time = time.monotonic()
 
-    def _on_signal(signum, _frame):
+    # Ignore Ctrl+C and SIGTERM so we always run for full duration and save
+    prev_sigint = signal.signal(signal.SIGINT, signal.SIG_IGN)
+    prev_sigterm = signal.signal(signal.SIGTERM, signal.SIG_IGN)
+
+    def _timed_stop():
+        stop_event.wait(timeout=duration)
         stop_event.set()
-
-    prev_sigint = signal.signal(signal.SIGINT, _on_signal)
-    prev_sigterm = signal.signal(signal.SIGTERM, _on_signal)
-
-    if duration is not None:
-        threading.Thread(target=lambda: (stop_event.wait(timeout=duration),
-                                         stop_event.set()),
-                         daemon=True).start()
-
-    if sys.stdin.isatty():
-        def _wait_enter():
-            try:
-                input()
-            except EOFError:
-                pass
-            stop_event.set()
-        threading.Thread(target=_wait_enter, daemon=True).start()
+    threading.Thread(target=_timed_stop, daemon=True).start()
 
     if record_depth:
         print(f"Warming up ({_WARMUP_FRAMES} frames)...", end="", flush=True)
@@ -500,7 +485,7 @@ def _record_realsense(
     width: int, height: int, fps: int,
     preview: bool,
     record_depth: bool,
-    duration: float | None,
+    duration: float,
     depth_min_m: float,
     depth_max_m: float,
 ) -> tuple[int, float, dict]:
@@ -571,38 +556,26 @@ def _record_realsense(
     depth_label = " + depth" if record_depth else ""
     print(f"Recording {object_name} at {actual_w}x{actual_h} "
           f"@ {actual_fps} fps{depth_label}  [{camera_tag}]")
-    if duration is not None:
-        print(f"Recording for {duration}s ...")
-    else:
-        print("Press Enter or Ctrl+C to stop recording...")
+    print(f"Recording for {duration}s (Ctrl+C ignored, auto-stop)...")
 
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     writer = cv2.VideoWriter(str(video_path), fourcc, actual_fps,
                              (actual_w, actual_h))
     ann_writer = cv2.VideoWriter(str(annotated_path), fourcc, actual_fps,
-                                 (actual_w, actual_h))
+                                (actual_w, actual_h))
 
     stop_event = threading.Event()
     frame_count = 0
     start_time = time.monotonic()
 
-    def _on_signal(signum, _frame):
-        stop_event.set()
-    prev_sigint = signal.signal(signal.SIGINT, _on_signal)
-    prev_sigterm = signal.signal(signal.SIGTERM, _on_signal)
+    # Ignore Ctrl+C and SIGTERM so we always run for full duration and save
+    prev_sigint = signal.signal(signal.SIGINT, signal.SIG_IGN)
+    prev_sigterm = signal.signal(signal.SIGTERM, signal.SIG_IGN)
 
-    if duration is not None:
-        threading.Thread(target=lambda: (stop_event.wait(timeout=duration),
-                                         stop_event.set()),
-                         daemon=True).start()
-    if sys.stdin.isatty():
-        def _we():
-            try:
-                input()
-            except EOFError:
-                pass
-            stop_event.set()
-        threading.Thread(target=_we, daemon=True).start()
+    def _timed_stop():
+        stop_event.wait(timeout=duration)
+        stop_event.set()
+    threading.Thread(target=_timed_stop, daemon=True).start()
 
     if record_depth:
         print(f"Warming up ({_WARMUP_FRAMES} frames)...", end="", flush=True)
@@ -709,7 +682,7 @@ def record(
     fps: int = 30,
     preview: bool = True,
     record_depth: bool = True,
-    duration: float | None = None,
+    duration: float = 15,
     depth_min_m: float = 0.2,
     depth_max_m: float = 3.0,
 ) -> Path:
@@ -846,8 +819,8 @@ def main():
                         help="Disable live preview window")
     parser.add_argument("--no-depth", action="store_true",
                         help="Disable depth recording")
-    parser.add_argument("--duration", type=float, default=None,
-                        help="Auto-stop after N seconds")
+    parser.add_argument("--duration", type=float, default=15,
+                        help="Run for N seconds then auto-stop (default: 15)")
     parser.add_argument("--depth-min", type=float, default=0.2,
                         help="Min depth range in metres (default: 0.2)")
     parser.add_argument("--depth-max", type=float, default=3.0,

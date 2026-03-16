@@ -53,7 +53,8 @@ FROM conda-env AS runtime
 
 # Runtime library needed by pyrealsense2 (installed separately to avoid
 # invalidating the conda-env cache when adding new apt packages).
-RUN apt-get update && apt-get install -y --no-install-recommends libusb-1.0-0 \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libusb-1.0-0 libopengl0 libegl1-mesa \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy tbp.monty source and install as a non-editable package.

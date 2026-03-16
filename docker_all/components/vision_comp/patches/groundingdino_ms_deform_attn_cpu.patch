@@ -1,6 +1,14 @@
 --- a/groundingdino/models/GroundingDINO/ms_deform_attn.py
 +++ b/groundingdino/models/GroundingDINO/ms_deform_attn.py
-@@ -27,8 +27,10 @@ from torch.nn.init import constant_, xavier_uniform_
+@@ -24,6 +24,7 @@
+ # ------------------------------------------------------------------------------------------------
+ 
+ import math
++import sys
+ import warnings
+ from typing import Optional
+ 
+@@ -27,8 +28,11 @@ from torch.nn.init import constant_, xavier_uniform_
  
  try:
      from groundingdino import _C
@@ -8,11 +16,12 @@
 +    _HAS_C_OPS = True
 +except Exception:
      warnings.warn("Failed to load custom C++ ops. Running on CPU mode Only!")
++    print("GroundingDINO: CRITICAL — custom C++ ops failed to load; would run in slow CPU fallback.", file=sys.stderr, flush=True)
 +    _HAS_C_OPS = False
  
  
  # helpers
-@@ -327,7 +329,7 @@ class MultiScaleDeformableAttention(nn.Module):
+@@ -327,7 +331,7 @@ class MultiScaleDeformableAttention(nn.Module):
                  )
              )
      
