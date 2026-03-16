@@ -26,6 +26,9 @@ turntable-scan = "monty_ext.scripts.turntable_scan:main"
 turntable-learn = "monty_ext.scripts.turntable_learn:main"
 visualize-model = "monty_ext.scripts.visualize_model:main"
 run-cnn-experiment = "monty_ext.scripts.run_cnn_experiment:main"
+generate-cnn-config-yaml = "monty_ext.scripts.generate_cnn_config_yaml:main"
+visualize-learned-models = "monty_ext.scripts.visualize_learned_models:main"
+run-5lm-crop = "monty_ext.configs.dist_agent_5lm_2obj_crop:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
